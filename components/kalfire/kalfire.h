@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "esphome/components/switch/switch.h"
 
 
 namespace esphome {
@@ -10,6 +11,11 @@ class Kalfire : public Component {
 
     public:
         Kalfire();
+        void set_enable_flame_state(bool state);
+        void set_eco_mode_state(bool state);
+        void set_flame_height(uint8_t flame_height);
+
+        void dump_config() override;
 
     private:
         float flame_height_to_voltage(uint8_t flame_height);
@@ -19,10 +25,9 @@ class Kalfire : public Component {
         uint8_t flame_height = 0;
         bool power_on = false;
         bool eco_mode = false;
-        static const float MAX_FLAME_HEIGHT_VOLTAGE;
-        static const float MIN_FLAME_HEIGHT_VOLTAGE;
-        static const uint8_t MAX_FLAME_HEIGHT;
-        static const uint8_t MIN_FLAME_HEIGHT;
+
+        void update_output();
+
 };
 
 } // namespace status_led

@@ -1,0 +1,184 @@
+substitutions:
+  name: esphome-web-39e6a0
+  friendly_name: Sfeerhaard
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2024.6.0
+  name_add_mac_suffix: false
+  platformio_options:
+    board_build.flash_mode: dio
+  project:
+    name: esphome.web
+    version: dev
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+
+# Allow Over-The-Air updates
+ota:
+- platform: esphome
+
+# Allow provisioning Wi-Fi via serial
+improv_serial:
+
+# wifi:
+#   # Set up a wifi access point
+#   ap: {}
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# In combination with the `ap` this allows the user
+# to provision wifi credentials to the device via WiFi AP.
+captive_portal:
+
+dashboard_import:
+  package_import_url: github://esphome/firmware/esphome-web/esp32s3.yaml@main
+  import_full_config: true
+
+# Sets up Bluetooth LE (Only on ESP32) to allow the user
+# to provision wifi credentials to the device.
+esp32_improv:
+  authorizer: none
+
+# To have a "next url" for improv serial
+web_server:
+
+
+#ethernet:
+#  type: W5500
+#  clk_pin: GPIOXX
+#  mosi_pin: GPIOXX
+#  miso_pin: GPIOXX
+#  cs_pin: GPIOXX
+#  interrupt_pin: GPIOXX
+#  reset_pin: GPIOXX
+external_components:
+  - source: ./components
+
+button:
+  - platform: restart
+    name: "Restart device"
+  - platform: safe_mode
+    name: "Restart in safe mode"
+
+i2c:
+  sda: GPIO2
+  scl: GPIO1
+  scan: true
+  id: i2c_bus
+
+gp8403:
+  id: dac_gp8403
+  voltage: 10V
+
+kalfire:
+  id: my_kalfire
+  # output: my_gp8403_output_1
+
+# output:
+#   - platform: gp8403
+#     id: my_gp8403_output_1
+#     gp8403_id: dac_gp8403
+#     channel: 0
+#   - platform: gp8403
+#     id: my_gp8403_output_2
+#     gp8403_id: dac_gp8403
+#     channel: 1
+
+# switch:
+#   - platform: template
+#     id: eco_mode
+#     name: "Eco mode"
+#     optimistic: true
+#   - platform: template
+#     id: enable
+#     name: "Power"
+#     optimistic: true
+#     on_turn_off: 
+#       then:
+#         - select.set:
+#             id: sfeerhaard_mode
+#             option: "off"
+#     on_turn_on: 
+#       then:
+#         - select.set:
+#             id: sfeerhaard_mode
+#             option: String((int)id(sfeerhaard_power).state))
+            
+            
+
+# select:
+#   - platform: template
+#     id: sfeerhaard_mode
+#     name: mode
+#     options:
+#       - "1"
+#       - "2"
+#       - "3"
+#       - "4"
+#       - "5"
+#       - "6"
+#       - "7"
+#       - "8"
+#       - "eco"
+#       - "off"
+#     initial_option: "off"
+#     optimistic: true
+#     internal: true
+#     on_value:
+#       then:
+#         - lambda: |-
+#             float level;
+#             if (id(sfeerhaard_mode).state == "1") {
+#               level = 30;
+#             } else if (id(sfeerhaard_mode).state == "2") {
+#               level = 39;
+#             } else if (id(sfeerhaard_mode).state == "3") {
+#               level = 48;
+#             } else if (id(sfeerhaard_mode).state == "4") {
+#               level = 57;
+#             } else if (id(sfeerhaard_mode).state == "5") {
+#               level = 65;
+#             } else if (id(sfeerhaard_mode).state == "6") {
+#               level = 74;
+#             } else if (id(sfeerhaard_mode).state == "7") {
+#               level = 84;
+#             } else if (id(sfeerhaard_mode).state == "8") {
+#               level = 90;
+#             } else if (id(sfeerhaard_mode).state == "eco") {
+#               level = 95;
+#             } else { // for "eco" or "off"
+#               level = 0;
+#             }
+#             id(my_gp8403_output_1).set_level(level / 100.0);
+            
+
+# number:
+#   - platform: template
+#     name: "Stand"
+#     id: sfeerhaard_power
+#     min_value: 1
+#     max_value: 8
+#     step: 1
+#     optimistic: true
+#     restore_value: true
+#     on_value: 
+#       then:
+#         - select.set: 
+#             id: sfeerhaard_mode
+#             option: String((int)id(sfeerhaard_power).state))
+            
+    
+    

@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/switch/switch.h"
+#include "esphome/components/output/float_output.h"
 
 
 namespace esphome {
@@ -17,6 +18,8 @@ class Kalfire : public Component {
 
         void dump_config() override;
 
+        void set_output(esphome::output::FloatOutput* output) { this->output = output; }
+
     private:
         float flame_height_to_voltage(uint8_t flame_height);
 
@@ -27,6 +30,8 @@ class Kalfire : public Component {
         bool eco_mode = false;
 
         void update_output();
+
+        esphome::output::FloatOutput* output = nullptr;
 
 };
 

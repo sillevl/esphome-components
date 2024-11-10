@@ -46,6 +46,7 @@ i2c:
 gp8403:
   id: dac_gp8403
   voltage: 10V
+  address: 0x59
 
 output:
   - platform: gp8403
@@ -73,3 +74,4 @@ number:
 
 kalfire:
   id: my_kalfire
+  output: my_gp8403_output_1

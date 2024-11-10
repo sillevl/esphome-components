@@ -39,6 +39,9 @@ void Kalfire::set_flame_height(uint8_t flame_height) {
 void Kalfire::update_output() {
     float voltage = this->get_voltage();
     ESP_LOGI(TAG, "Voltage: %f", voltage);
+    if(this->output) {
+        this->output->set_level(voltage / 10);
+    }
 }
 
 float Kalfire::get_voltage() {

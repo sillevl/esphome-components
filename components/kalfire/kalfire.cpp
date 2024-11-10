@@ -66,6 +66,7 @@ void Kalfire::add_output(esphome::output::FloatOutput* output) {
 }
 
 void Kalfire::add_flame_height_number(esphome::number::Number* flame_height_number) {
+    ESP_LOGCONFIG(TAG, "Adding flame height number");
     flame_height_number->add_on_state_callback([this](float state) {
         this->set_flame_height(state);
     });

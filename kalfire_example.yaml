@@ -14,6 +14,11 @@ wifi:
 external_components:
   - source: ./components
 
+# or use the following to get the latest version from github
+# external_components:
+#   source: github://sillevl/esphome-components
+#   components: [ kalfire ]
+
 i2c:
   sda: GPIO2
   scl: GPIO1

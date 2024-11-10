@@ -10,7 +10,14 @@ ESPHome component for Kalfire fireplace using 0-10V inteface
 
 The component will calculate a voltage for an 0-10V output depending on the settings.
 
+![M5Stack Atom S3 with GP8403 DAC](./img/m5stack_atom_s3.png)
+
+The implementation is tested with an M5Stack Atom S3 and GP8403 DAC module.
+
 ## Example
+
+The component lets you choose any output component that supports float values.
+You need to provide one. In the example below `my_gp8403_output_1` is an ESPHome output component id.
 
 ```yaml
 switch:

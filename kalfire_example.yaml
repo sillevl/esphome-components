@@ -14,17 +14,6 @@ wifi:
 external_components:
   - source: ./components
 
-# switch:
-#   - platform: template
-#     name: Enable flame
-#     id: enable_flame
-#     optimistic: true
-
-#   - platform: template
-#     name: Enable ECO mode
-#     id: enable_eco_mode
-#     optimistic: true
-
 i2c:
   sda: GPIO2
   scl: GPIO1
@@ -46,23 +35,19 @@ output:
     gp8403_id: dac_gp8403
     channel: 1
 
-# number:
-#   - platform: template
-#     name: Flame height
-#     id: flame_height
-#     min_value: 1
-#     max_value: 8
-#     step: 1
-#     optimistic: true
-#     restore_value: true
-
 switch:
   - platform: kalfire
-    kalfire_id: my_kalfire
+    flame:
+      name: Enable flame
+    eco_mode:
+      name: Enable ECO mode
+
+number:
+  - platform: kalfire
+    flame_height:
+      name: Flame height
 
 kalfire:
   id: my_kalfire
   output: my_gp8403_output_1
-  # flame_height: flame_height
-  # enable_flame: enable_flame
-  # eco_mode: enable_eco_mode
+

@@ -20,9 +20,6 @@ class Kalfire : public Component {
         void dump_config() override;
 
         void add_output(esphome::output::FloatOutput* output);
-        void add_flame_height_number(esphome::number::Number* flame_height_number);
-        void add_enable_flame_switch(switch_::Switch *enable_flame_switch);
-        void add_eco_mode_switch(switch_::Switch *eco_mode_switch);
 
     private:
         float flame_height_to_voltage(uint8_t flame_height);

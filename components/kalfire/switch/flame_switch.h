@@ -6,9 +6,9 @@
 namespace esphome {
 namespace kalfire {
 
-class TestSwitch : public switch_::Switch, public Parented<Kalfire> {
+class FlameSwitch : public switch_::Switch, public Parented<Kalfire> {
  public:
-  TestSwitch() = default;
+  FlameSwitch() = default;
 
  protected:
   void write_state(bool state) override;

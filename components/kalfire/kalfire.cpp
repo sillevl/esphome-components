@@ -65,25 +65,6 @@ void Kalfire::add_output(esphome::output::FloatOutput* output) {
     this->output = output;
 }
 
-void Kalfire::add_flame_height_number(esphome::number::Number* flame_height_number) {
-    ESP_LOGCONFIG(TAG, "Adding flame height number");
-    flame_height_number->add_on_state_callback([this](float state) {
-        this->set_flame_height(state);
-    });
-}
-
-void Kalfire::add_enable_flame_switch(switch_::Switch *enable_flame_switch) {
-    enable_flame_switch->add_on_state_callback([this](bool state) {
-        this->set_enable_flame_state(state);
-    });
-}
-
-void Kalfire::add_eco_mode_switch(switch_::Switch *eco_mode_switch) {
-    eco_mode_switch->add_on_state_callback([this](bool state) {
-        this->set_eco_mode_state(state);
-    });
-}
-
 void Kalfire::dump_config() {
     ESP_LOGCONFIG(TAG, "Kalfire:");
     ESP_LOGCONFIG(TAG, "  Power: %s", this->power_on ? "ON" : "OFF");

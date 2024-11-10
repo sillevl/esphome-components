@@ -12,4 +12,22 @@ The component will calculate a voltage for an 0-10V output depending on the sett
 
 ## Example
 
+```yaml
+switch:
+  - platform: kalfire
+    flame:
+      name: Enable flame
+    eco_mode:
+      name: Enable ECO mode
+
+number:
+  - platform: kalfire
+    flame_height:
+      name: Flame height
+
+kalfire:
+  id: my_kalfire
+  output: my_gp8403_output_1
+```
+
 An example configuration can be found in the [kalfire_example.yaml](../../kalfire_example.yaml) file.

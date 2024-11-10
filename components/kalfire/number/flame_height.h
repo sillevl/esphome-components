@@ -1,7 +1,7 @@
 #pragma once
 
 #include "esphome/components/number/number.h"
-#include "kalfire.h"
+#include "../kalfire.h"
 
 namespace esphome {
 namespace kalfire {

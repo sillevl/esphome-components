@@ -10,8 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCES = [
     "tests/test_kalfire.cpp",
     "components/kalfire/kalfire.cpp",
-    "components/kalfire/switch/flame_switch.cpp",
-    "components/kalfire/switch/eco_mode.cpp",
+    "components/kalfire/select/mode_select.cpp",
     "components/kalfire/number/flame_height.cpp",
 ]
 FLAGS = ["-std=c++17", "-Wall", "-Wextra", "-Itests/stubs", "-I."]

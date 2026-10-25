@@ -1,4 +1,4 @@
-"""Exercise real ESPHome validation and code generation without credentials/hardware."""
+"""Exercise real ESPHome validation/code generation without credentials/hardware."""
 from pathlib import Path
 import subprocess
 import sys
@@ -24,34 +24,56 @@ def run_esphome(tmp_path, change=None, generate=False):
     return result, tmp_path / "build"
 
 
-def test_validation_and_codegen(tmp_path):
-    result, build = run_esphome(tmp_path, generate=True)
+def add_limits(config):
+    config["sensor"] = [{"platform": "template", "id": "room_temperature", "unit_of_measurement": "°C"}]
+    config["kalfire"].update({
+        "session_timeout": "90min",
+        "temperature_limit": {
+            "sensor": "room_temperature", "ceiling": "23°C", "restart_margin": "0.5°C",
+            "max_age": "5min", "unavailable_grace_period": "60s",
+        },
+        "time_remaining": {"name": "Time remaining"},
+        "last_stop_reason": {"name": "Last stop reason"},
+        "temperature_limit_status": {"name": "Temperature limit status"},
+    })
+
+
+@pytest.mark.parametrize("limits", [False, True])
+def test_validation_and_codegen(tmp_path, limits):
+    result, build = run_esphome(tmp_path, add_limits if limits else None, generate=True)
     assert result.returncode == 0, result.stdout + result.stderr
     generated = (build / "src/main.cpp").read_text()
-    for call in ["set_flame_switch(", "set_eco_mode_switch(", "set_flame_height_number("]:
+    for call in ["set_mode_select(", "set_flame_height_number("]:
         assert call in generated
     assert "set_model(gp8403::GP8413)" in generated
-    assert "set_device_class(\"power\")" not in generated
-    assert "ENTITY_CATEGORY_CONFIG" not in generated
+    assert '"Off"' in generated and '"Manual"' in generated and '"ECO"' in generated
+    if limits:
+        for call in ["set_session_timeout(", "set_temperature_limit(", "set_time_remaining_sensor("]:
+            assert call in generated
+    else:
+        assert "set_session_timeout(" not in generated
+        assert "set_temperature_limit(" not in generated
 
 
-@pytest.mark.parametrize("control", ["flame", "eco_mode"])
-@pytest.mark.parametrize("mode", ["ALWAYS_ON", "RESTORE_DEFAULT_ON", "RESTORE_DEFAULT_OFF", "DISABLED"])
-def test_unsupported_restore_modes_rejected(tmp_path, control, mode):
+@pytest.mark.parametrize("duration", ["0s", "-1s", "25h"])
+def test_invalid_session_duration_rejected(tmp_path, duration):
+    result, _ = run_esphome(tmp_path, lambda c: c["kalfire"].update(session_timeout=duration))
+    assert result.returncode != 0
+    assert "session_timeout" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("key,value", [
+    ("ceiling", "nan"), ("restart_margin", "-1°C"),
+    ("max_age", "0s"), ("max_age", "25h"),
+    ("unavailable_grace_period", "-1s"), ("unavailable_grace_period", "25h"),
+])
+def test_invalid_temperature_limits_rejected(tmp_path, key, value):
     def change(config):
-        config["switch"][0][control]["restore_mode"] = mode
+        add_limits(config)
+        config["kalfire"]["temperature_limit"][key] = value
     result, _ = run_esphome(tmp_path, change)
     assert result.returncode != 0
-    assert "restore_mode" in result.stdout + result.stderr
-
-
-@pytest.mark.parametrize("control", ["flame", "eco_mode"])
-def test_inversion_rejected(tmp_path, control):
-    def change(config):
-        config["switch"][0][control]["inverted"] = True
-    result, _ = run_esphome(tmp_path, change)
-    assert result.returncode != 0
-    assert "Inverted is not supported" in result.stdout + result.stderr
+    assert key in result.stdout + result.stderr
 
 
 def test_binary_output_rejected(tmp_path):
@@ -63,9 +85,32 @@ def test_binary_output_rejected(tmp_path):
     assert "FloatOutput" in result.stdout + result.stderr
 
 
-def test_explicit_always_off_accepted(tmp_path):
+def test_legacy_switches_have_migration_error(tmp_path):
     def change(config):
-        for control in ["flame", "eco_mode"]:
-            config["switch"][0][control]["restore_mode"] = "ALWAYS_OFF"
+        config.pop("select")
+        config["switch"] = [{"platform": "kalfire", "flame": {"name": "Flame"}, "eco_mode": {"name": "ECO"}}]
     result, _ = run_esphome(tmp_path, change)
+    assert result.returncode != 0
+    assert "select" in result.stdout + result.stderr
+
+
+def test_temperature_limit_requires_sensor(tmp_path):
+    def change(config):
+        add_limits(config)
+        del config["kalfire"]["temperature_limit"]["sensor"]
+    result, _ = run_esphome(tmp_path, change)
+    assert result.returncode != 0
+    assert "sensor" in result.stdout + result.stderr
+
+
+def test_timer_and_temperature_are_independent(tmp_path):
+    def change(config):
+        add_limits(config)
+        config["kalfire"].pop("session_timeout")
+    result, _ = run_esphome(tmp_path, change)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_timer_without_temperature(tmp_path):
+    result, _ = run_esphome(tmp_path, lambda c: c["kalfire"].update(session_timeout="30min"))
     assert result.returncode == 0, result.stdout + result.stderr

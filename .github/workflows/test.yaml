@@ -21,5 +21,7 @@ jobs:
         run: python tests/run_cpp_tests.py
       - name: ESPHome schema and code-generation tests
         run: python -m pytest tests/test_config.py -q
-      - name: ESP32-S3 firmware build (no upload)
-        run: python -m esphome compile tests/configs/kalfire.yaml
+      - name: ESP32-S3 firmware builds, with and without limits (no upload)
+        run: |
+          python -m esphome compile tests/configs/kalfire.yaml
+          python -m esphome compile tests/configs/kalfire-limits.yaml

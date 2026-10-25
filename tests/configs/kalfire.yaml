@@ -30,14 +30,10 @@ output:
     gp8403_id: dac_gp8403
     channel: 0
 
-switch:
+select:
   - platform: kalfire
-    flame:
-      id: flame_request
-      name: Enable flame
-    eco_mode:
-      id: eco_request
-      name: Enable ECO mode
+    id: requested_mode
+    name: Fireplace mode
 
 number:
   - platform: kalfire

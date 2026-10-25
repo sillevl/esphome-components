@@ -1,0 +1,28 @@
+# Build-only fixture. The template is NOT a real room-temperature measurement.
+packages:
+  base: !include kalfire.yaml
+
+esphome:
+  name: kalfire-limits-test
+
+sensor:
+  - platform: template
+    id: room_temperature
+    unit_of_measurement: °C
+    lambda: return 22.0f;
+    update_interval: 30s
+
+kalfire:
+  session_timeout: 90min
+  temperature_limit:
+    sensor: room_temperature
+    ceiling: 23°C
+    restart_margin: 0.5°C
+    max_age: 5min
+    unavailable_grace_period: 60s
+  time_remaining:
+    name: Session time remaining
+  last_stop_reason:
+    name: Last stop reason
+  temperature_limit_status:
+    name: Temperature limit status

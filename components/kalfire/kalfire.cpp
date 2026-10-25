@@ -1,103 +1,199 @@
 #include "kalfire.h"
 #include <algorithm>
-#include <cmath>
+#include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
-namespace esphome {
-namespace kalfire {
+namespace esphome::kalfire {
 
 static const char *const TAG = "kalfire";
 
-static const float ECO_MODE_VOLTAGE = 9.5;
-static const float POWER_OFF_VOLTAGE = 0.0;
-static const float MIN_FLAME_HEIGHT_VOLTAGE = 3.0;
-static const float MAX_FLAME_HEIGHT_VOLTAGE = 9.0;
-static const uint8_t MIN_FLAME_HEIGHT = 1;
-static const uint8_t MAX_FLAME_HEIGHT = 8;
-
-Kalfire::Kalfire() {
-    // Constructor
-}
-
 void Kalfire::setup() {
-    // The DAC initializes at DATA priority; run afterward, before networking.
-    // This is a requested output, not confirmation of voltage or flame state.
-    this->power_on = false;
-    this->eco_mode = false;
-    this->flame_height = MIN_FLAME_HEIGHT;
-    update_output();
-
-    if (this->flame_height_number != nullptr) {
-        this->flame_height_number->publish_state(this->flame_height);
-    }
-    if (this->eco_mode_switch != nullptr) {
-        this->eco_mode_switch->publish_state(this->eco_mode);
-    }
-    if (this->flame_switch != nullptr) {
-        this->flame_switch->publish_state(this->power_on);
-    }
+  // GP8403/GP8413 initializes at DATA priority. No previous session is restored.
+  this->ready_ = false;
+  this->mode_ = Mode::OFF;
+  this->flame_height_ = 1;
+  this->last_stop_reason_ = "Startup";
+  this->sample_seen_ = false;
+  this->sample_expired_ = true;
+  this->temperature_ = NAN;
+  this->too_warm_ = false;
+  this->unavailable_tracking_ = true;
+  this->unavailable_since_ms_ = millis();
+  this->update_output_();
+  if (this->temperature_sensor_ != nullptr) {
+    // Require a publication after setup; do not adopt a possibly cached state.
+    this->temperature_sensor_->add_on_state_callback([this](float value) { this->on_temperature_(value); });
+  }
+  if (this->height_number_ != nullptr) this->height_number_->publish_state(this->flame_height_);
+  this->publish_mode_();
+  this->publish_diagnostics_(millis());
+  this->ready_ = true;
 }
 
-void Kalfire::set_enable_flame_state(bool state) {
-    this->power_on = state;
-    ESP_LOGI(TAG, "Flame request: %s", this->power_on ? "ON" : "OFF");
-    update_output();
+void Kalfire::set_temperature_limit(sensor::Sensor *sensor, float ceiling, float restart_margin,
+                                   uint32_t max_age, uint32_t unavailable_grace) {
+  this->temperature_sensor_ = sensor;
+  this->ceiling_ = ceiling;
+  this->restart_margin_ = restart_margin;
+  this->max_age_ms_ = max_age;
+  this->unavailable_grace_ms_ = unavailable_grace;
 }
 
-void Kalfire::set_eco_mode_state(bool state) {
-    this->eco_mode = state;
-    ESP_LOGI(TAG, "Eco mode: %s", this->eco_mode ? "ON" : "OFF");
-    update_output();
-}
-
-bool Kalfire::set_flame_height(float flame_height) {
-    if (!std::isfinite(flame_height) || flame_height < MIN_FLAME_HEIGHT ||
-        flame_height > MAX_FLAME_HEIGHT || std::floor(flame_height) != flame_height) {
-        ESP_LOGW(TAG, "Ignoring invalid flame height; expected an integer from 1 to 8");
-        return false;
-    }
-    this->flame_height = static_cast<uint8_t>(flame_height);
-    ESP_LOGI(TAG, "Requested flame height: %d", this->flame_height);
-    update_output();
+bool Kalfire::request_mode(Mode requested) {
+  if (!this->ready_ || requested > Mode::ECO || (this->stopping_ && requested != Mode::OFF)) return false;
+  const uint32_t now = millis();
+  // An overdue session cannot be extended by a repeated mode command. Also
+  // preserve any newer command issued by synchronous diagnostic callbacks.
+  const uint32_t revision = this->mode_revision_;
+  const bool stopped = this->evaluate_limits_(now);
+  if (requested != Mode::OFF && (stopped || revision != this->mode_revision_)) return false;
+  if (requested == Mode::OFF) {
+    if (this->mode_ != Mode::OFF) this->stop_("User", now);
     return true;
+  }
+  if (this->temperature_sensor_ != nullptr && (!this->temperature_available_(now) || this->too_warm_)) {
+    ESP_LOGW(TAG, "Start/mode request rejected by temperature limit");
+    return false;
+  }
+  if (requested == this->mode_) return true;
+  if (this->mode_ == Mode::OFF) this->session_started_ms_ = now;
+  this->mode_ = requested;
+  ++this->mode_revision_;
+  this->update_output_();
+  this->publish_mode_();
+  this->publish_diagnostics_(now);
+  return this->mode_ == requested;
 }
 
-void Kalfire::update_output() {
-    float voltage = this->get_voltage();
-    ESP_LOGI(TAG, "Requested voltage: %f", voltage);
-    if(this->output) {
-        this->output->set_level(voltage / 10);
+bool Kalfire::set_flame_height(float height) {
+  if (!this->ready_ || !std::isfinite(height) || height < 1 || height > 8 || std::floor(height) != height) {
+    ESP_LOGW(TAG, "Ignoring invalid/not-ready flame height request; expected an integer from 1 to 8");
+    return false;
+  }
+  this->evaluate_limits_(millis());
+  this->flame_height_ = static_cast<uint8_t>(height);
+  this->update_output_();
+  return true;
+}
+
+bool Kalfire::temperature_available_(uint32_t now) const {
+  return this->sample_seen_ && !this->sample_expired_ && std::isfinite(this->temperature_) &&
+         static_cast<uint32_t>(now - this->sample_ms_) < this->max_age_ms_;
+}
+
+void Kalfire::on_temperature_(float value) {
+  const uint32_t now = millis();
+  // Enforce any deadline already reached before accepting a recovery sample.
+  this->evaluate_limits_(now);
+  this->temperature_ = value;
+  this->sample_ms_ = now;
+  this->sample_seen_ = true;
+  this->sample_expired_ = false;
+  this->evaluate_limits_(now);
+}
+
+bool Kalfire::evaluate_limits_(uint32_t now) {
+  if (this->temperature_sensor_ != nullptr) {
+    // Once expired, an old sample stays expired even after another millis wrap.
+    if (this->sample_seen_ && static_cast<uint32_t>(now - this->sample_ms_) >= this->max_age_ms_) {
+      this->sample_expired_ = true;
     }
+    if (this->temperature_available_(now)) {
+      this->unavailable_tracking_ = false;
+      if (this->temperature_ >= this->ceiling_) this->too_warm_ = true;
+      else if (this->temperature_ <= this->ceiling_ - this->restart_margin_) this->too_warm_ = false;
+    } else if (!this->unavailable_tracking_) {
+      this->unavailable_tracking_ = true;
+      // Staleness begins at max_age, not when a later loop happens to notice it.
+      this->unavailable_since_ms_ = this->sample_seen_ && std::isfinite(this->temperature_)
+                                       ? this->sample_ms_ + this->max_age_ms_ : now;
+    }
+  }
+  if (this->mode_ != Mode::OFF) {
+    if (this->session_timeout_ms_ != 0 &&
+        static_cast<uint32_t>(now - this->session_started_ms_) >= this->session_timeout_ms_) {
+      this->stop_("Timeout", now);
+      return true;
+    }
+    if (this->temperature_sensor_ != nullptr) {
+      if (this->temperature_available_(now) && this->too_warm_) {
+        this->stop_("Temperature ceiling", now);
+        return true;
+      }
+      if (this->unavailable_tracking_ &&
+          static_cast<uint32_t>(now - this->unavailable_since_ms_) >= this->unavailable_grace_ms_) {
+        this->stop_("Temperature unavailable", now);
+        return true;
+      }
+    }
+  }
+  this->publish_diagnostics_(now);
+  return false;
 }
 
-float Kalfire::get_voltage() {
-    if(!this->power_on) { return POWER_OFF_VOLTAGE; }
-    if(this->eco_mode) { return ECO_MODE_VOLTAGE; }
+void Kalfire::loop() { this->evaluate_limits_(millis()); }
 
-    return flame_height_to_voltage(this->flame_height);
+void Kalfire::stop_(const char *reason, uint32_t now) {
+  // State and output are committed before callbacks. Refuse synchronous restart
+  // attempts from Off/stop-reason automations during this transition.
+  this->stopping_ = true;
+  this->mode_ = Mode::OFF;
+  ++this->mode_revision_;
+  this->last_stop_reason_ = reason;
+  this->update_output_();
+  this->publish_mode_();
+  this->publish_diagnostics_(now);
+  this->stopping_ = false;
 }
 
-float Kalfire::flame_height_to_voltage(uint8_t flame_height) {
-    flame_height = std::min(flame_height, MAX_FLAME_HEIGHT);
-    flame_height = std::max(flame_height, MIN_FLAME_HEIGHT);
-
-    float a = MIN_FLAME_HEIGHT_VOLTAGE;
-    float b = (MAX_FLAME_HEIGHT_VOLTAGE - MIN_FLAME_HEIGHT_VOLTAGE) /
-              (MAX_FLAME_HEIGHT - MIN_FLAME_HEIGHT);
-
-    return a + (b * (flame_height - MIN_FLAME_HEIGHT));
+void Kalfire::update_output_() {
+  float voltage = 0.0f;
+  if (this->mode_ == Mode::ECO) voltage = 9.5f;
+  else if (this->mode_ == Mode::MANUAL) voltage = 3.0f + 6.0f * (this->flame_height_ - 1) / 7.0f;
+  ESP_LOGI(TAG, "Requested voltage: %.3f", voltage);
+  if (this->output_ != nullptr) this->output_->set_level(voltage / 10.0f);
 }
 
-void Kalfire::add_output(esphome::output::FloatOutput* output) {
-    this->output = output;
+void Kalfire::publish_mode_() {
+  const size_t index = static_cast<size_t>(this->mode_);
+  if (this->mode_select_ != nullptr &&
+      (!this->mode_select_->has_state() || this->mode_select_->active_index().value() != index)) {
+    this->mode_select_->publish_state(index);
+  }
+}
+
+void Kalfire::publish_diagnostics_(uint32_t now) {
+  if (this->remaining_sensor_ != nullptr) {
+    float remaining = NAN;  // Unlimited, not zero seconds remaining.
+    if (this->session_timeout_ms_ != 0) {
+      const uint32_t elapsed = this->mode_ == Mode::OFF ? this->session_timeout_ms_
+                                                     : now - this->session_started_ms_;
+      remaining = (this->session_timeout_ms_ - std::min(elapsed, this->session_timeout_ms_) + 999) / 1000;
+    }
+    const float old = this->remaining_sensor_->state;
+    if (!this->remaining_sensor_->has_state() ||
+        (std::isnan(remaining) ? !std::isnan(old) : remaining != old)) {
+      this->remaining_sensor_->publish_state(remaining);
+    }
+  }
+  if (this->stop_reason_sensor_ != nullptr &&
+      (!this->stop_reason_sensor_->has_state() || this->stop_reason_sensor_->state != this->last_stop_reason_)) {
+    this->stop_reason_sensor_->publish_state(this->last_stop_reason_);
+  }
+  const char *status = "Disabled";
+  if (this->temperature_sensor_ != nullptr) {
+    status = !this->temperature_available_(now) ? "Unavailable" : this->too_warm_ ? "Too warm" : "Ready";
+  }
+  if (this->temperature_status_sensor_ != nullptr &&
+      (!this->temperature_status_sensor_->has_state() || this->temperature_status_sensor_->state != status)) {
+    this->temperature_status_sensor_->publish_state(status);
+  }
 }
 
 void Kalfire::dump_config() {
-    ESP_LOGCONFIG(TAG, "Kalfire:");
-    ESP_LOGCONFIG(TAG, "  Power: %s", this->power_on ? "ON" : "OFF");
-    ESP_LOGCONFIG(TAG, "  Eco mode: %s", this->eco_mode ? "ON" : "OFF");
-    ESP_LOGCONFIG(TAG, "  Flame height: %d (if power would be ON and eco_mode OFF)", this->flame_height);
+  ESP_LOGCONFIG(TAG, "Kalfire manual sessions (requested states only):");
+  ESP_LOGCONFIG(TAG, "  Local session timeout: %u ms (0 = disabled)", this->session_timeout_ms_);
+  ESP_LOGCONFIG(TAG, "  Temperature limit: %s", this->temperature_sensor_ != nullptr ? "enabled" : "disabled");
 }
 
-} // namespace kalfire
-} // namespace esphome
+}  // namespace esphome::kalfire

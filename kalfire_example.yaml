@@ -7,6 +7,11 @@ esp32:
     type: arduino
 
 logger:
+
+# Keep the local session timer running through an HA/API outage.
+api:
+  reboot_timeout: 0s
+
 web_server:
 
 wifi:
@@ -47,12 +52,10 @@ output:
     gp8403_id: dac_gp8403
     channel: 1
 
-switch:
+select:
   - platform: kalfire
-    flame:
-      name: Enable flame
-    eco_mode:
-      name: Enable ECO mode
+    id: fireplace_mode
+    name: Fireplace mode
 
 number:
   - platform: kalfire
@@ -62,4 +65,25 @@ number:
 kalfire:
   id: my_kalfire
   output: my_gp8403_output_1
+
+  # Optional local timer; omit for manual-only operation.
+  # session_timeout: 90min
+
+  # Optional ceiling: room_temperature must be a real, periodically publishing
+  # Celsius sensor defined elsewhere in this configuration. Read the module's
+  # freshness documentation before using a sensor imported from HA.
+  # temperature_limit:
+  #   sensor: room_temperature
+  #   ceiling: 23°C
+  #   restart_margin: 0.5°C
+  #   max_age: 5min
+  #   unavailable_grace_period: 60s
+
+  # Optional diagnostics (no temperature sensor is required to enable these).
+  # time_remaining:
+  #   name: Session time remaining
+  # last_stop_reason:
+  #   name: Last stop reason
+  # temperature_limit_status:
+  #   name: Temperature limit status
 

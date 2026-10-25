@@ -3,7 +3,7 @@ from esphome.components import switch
 import esphome.config_validation as cv
 from esphome.const import (
     DEVICE_CLASS_SWITCH,
-    ENTITY_CATEGORY_CONFIG,
+    CONF_RESTORE_MODE,
 )
 from .. import CONF_KALFIRE_ID, Kalfire, kalfire_ns
 
@@ -13,21 +13,28 @@ EcoModeSwitch = kalfire_ns.class_("EcoModeSwitch", switch.Switch)
 CONF_FLAME_SWITCH = "flame"
 CONF_ECO_MODE_SWITCH = "eco_mode"
 
-CONFIG_SCHEMA = {
+def control_switch_schema(class_, icon):
+    # A semantic fireplace command must not invert or restore a prior ON state.
+    return switch.switch_schema(
+        class_,
+        block_inverted=True,
+        default_restore_mode="ALWAYS_OFF",
+        device_class=DEVICE_CLASS_SWITCH,
+        icon=icon,
+    ).extend({
+        cv.Optional(CONF_RESTORE_MODE, default="ALWAYS_OFF"): cv.enum(
+            {"ALWAYS_OFF": switch.SwitchRestoreMode.SWITCH_ALWAYS_OFF},
+            upper=True,
+            space="_",
+        ),
+    })
+
+
+CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(CONF_KALFIRE_ID): cv.use_id(Kalfire),
-    cv.Required(CONF_FLAME_SWITCH): switch.switch_schema(
-        FlameSwitch,
-        device_class=DEVICE_CLASS_SWITCH,
-        entity_category=ENTITY_CATEGORY_CONFIG,
-        icon="mdi:fire",
-    ),
-    cv.Required(CONF_ECO_MODE_SWITCH): switch.switch_schema(
-        EcoModeSwitch,
-        device_class=DEVICE_CLASS_SWITCH,
-        entity_category=ENTITY_CATEGORY_CONFIG,
-        icon="mdi:sprout",
-    ),
-}
+    cv.Required(CONF_FLAME_SWITCH): control_switch_schema(FlameSwitch, "mdi:fire"),
+    cv.Required(CONF_ECO_MODE_SWITCH): control_switch_schema(EcoModeSwitch, "mdi:sprout"),
+})
 
 
 async def to_code(config):
@@ -35,8 +42,8 @@ async def to_code(config):
     if flame_switch_config := config.get(CONF_FLAME_SWITCH):
         s = await switch.new_switch(flame_switch_config)
         await cg.register_parented(s, config[CONF_KALFIRE_ID])
-        # cg.add(kalfire_component.add_eco_mode_switch(s))
+        cg.add(kalfire_component.set_flame_switch(s))
     if eco_mode_switch_config := config.get(CONF_ECO_MODE_SWITCH):
         s = await switch.new_switch(eco_mode_switch_config)
         await cg.register_parented(s, config[CONF_KALFIRE_ID])
-        # cg.add(kalfire_component.add_flame_switch(s))
+        cg.add(kalfire_component.set_eco_mode_switch(s))

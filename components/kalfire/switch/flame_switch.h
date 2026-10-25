@@ -9,6 +9,7 @@ namespace kalfire {
 class FlameSwitch : public switch_::Switch, public Parented<Kalfire> {
  public:
   FlameSwitch() = default;
+  bool assumed_state() override { return true; }
 
  protected:
   void write_state(bool state) override;

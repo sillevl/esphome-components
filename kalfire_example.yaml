@@ -76,7 +76,8 @@ kalfire:
   # session_duration:
   #   name: Session duration
 
-  # Optional temporary maximum-output override, then back to the prior mode.
+  # Optional boost switch: On requests maximum output; Off/timeout returns
+  # to the prior mode, unless a session/temperature limit has stopped the fire.
   # Normal flame height remains selected; Boost active indicates the override.
   # Existing session and temperature limits always take priority.
   # boost:

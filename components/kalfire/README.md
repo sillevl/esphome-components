@@ -10,7 +10,7 @@ presence. It is not a thermostat and never restarts automatically when a room co
 - A flame-height number, **1–8**, used only in Manual mode.
 - An optional local session timeout, fixed or selected through a duration dropdown.
 - An optional external-sensor temperature ceiling, independent of the timer.
-- An optional boost button: temporarily request maximum Manual output, then return.
+- An optional boost switch: temporarily request maximum Manual output, then return.
 - Optional diagnostics for remaining time, last stop reason and temperature readiness.
 
 ```yaml
@@ -179,7 +179,7 @@ kalfire:
   boost:
     name: Boost 10min
     duration: 10min  # Optional; defaults to 10min. Range: 1ms–24h.
-    active:         # Optional binary diagnostic.
+    active:         # Optional redundant binary diagnostic; existing YAML can keep it.
       name: Boost active
     time_remaining:  # Optional boost-only countdown, seconds rounded up.
       name: Boost time remaining
@@ -188,13 +188,14 @@ kalfire:
 Omitting `boost` disables it. It works with either the duration dropdown, a fixed
 session timeout, or neither. No new secrets or HA automation are required.
 
-A button press temporarily requests **Manual at level 8 (9 V)**. There is no level
+Turning the boost switch On temporarily requests **Manual at level 8 (9 V)**. There is no level
 9: 9.5 V is the separate ECO protocol. Boost time starts at the accepted command,
 not at confirmed ignition; no actual flame feedback is available.
 
 The normal flame-height number remains your selected **post-boost height**. It is
-not changed to 8 during boost. The mode select reports Manual and the optional
-`active` diagnostic indicates that boost is overriding the normal height.
+not changed to 8 during boost. The mode select reports Manual and the boost switch
+reports the actual internal override state. The optional `active` binary diagnostic
+can be retained for existing dashboards but is no longer necessary.
 
 | Before boost | At normal boost completion |
 | --- | --- |
@@ -209,10 +210,17 @@ not changed to 8 during boost. The mode select reports Manual and the optional
   active mode afterward. Cooling or sensor recovery does not restart anything.
 - An accepted explicit mode command (including Manual again), or a valid height
   command, cancels boost. Your new command wins; no delayed restoration remains.
-- Off cancels boost immediately. Rejected/invalid commands leave boost unchanged.
-- Repeated boost presses do not extend the boost deadline or replace the saved mode.
-  A press arriving after an unprocessed deadline first completes the old boost; a
-  subsequent explicit press is needed to start a new one.
+- Turning the **boost switch Off** ends boost immediately and returns to the
+  pre-boost mode/normal height, provided no session/temperature cutoff has won.
+  For a boost started from Off this stops the fireplace with stop reason `User`.
+- Selecting **mode Off** instead always stops the fireplace, with no restoration.
+  Rejected/invalid commands leave boost unchanged.
+- Repeated boost On commands do not extend the boost deadline or replace the saved
+  mode. An On arriving after an unprocessed deadline first completes the old boost;
+  a subsequent explicit On is needed to start a new one.
+- The switch automatically reports Off on timeout, manual takeover or a limit stop.
+  It is controller-owned, not optimistic. It always initializes Off: only
+  `restore_mode: ALWAYS_OFF` is accepted, and inversion is not supported.
 - Atom reboot always returns Off, with no boost/session restoration. HA reconnect
   does not itself start boost. Both countdowns run locally.
 
@@ -220,6 +228,16 @@ The session `time_remaining` and `boost.time_remaining` have different meanings:
 the former is the actual session cutoff; the latter is when maximum-output override
 ends. Boost remaining is zero while inactive. With no session timeout configured,
 the session remaining sensor stays unknown, but boost still has its own deadline.
+
+### Migration from the boost button
+
+The `boost:` YAML block, duration and optional diagnostics can stay as they are.
+It now creates a **switch**, not a button. Update dashboards/automations referencing
+`button.*` to the newly created `switch.*` entity and use `switch.turn_on`,
+`switch.turn_off` or toggle instead of `button.press`. If you configured `on_press`,
+replace it with an appropriate switch callback (`on_turn_on`/`on_turn_off`), without
+adding automatic ignition retries. The obsolete button entity may remain unavailable
+in HA; the firmware does not edit HA's registry.
 
 Keep first tests supervised. Boost is a convenience, not a thermostat, certified
 safety control, or automatic fault-reset/ignition-retry mechanism.

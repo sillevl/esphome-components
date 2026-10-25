@@ -6,6 +6,7 @@
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/number/number.h"
 #include "esphome/components/select/select.h"
+#include "esphome/components/switch/switch.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 
@@ -22,6 +23,7 @@ class Kalfire : public Component {
 
   bool request_mode(Mode mode);
   bool request_boost();
+  bool cancel_boost();
   bool is_boost_active() const { return this->boost_active_; }
   bool set_flame_height(float height);
   Mode get_mode() const { return this->mode_; }
@@ -31,6 +33,7 @@ class Kalfire : public Component {
   void set_flame_height_number(number::Number *height) { this->height_number_ = height; }
   void set_session_timeout(uint32_t timeout) { this->session_timeout_ms_ = timeout; }
   void set_boost_duration(uint32_t duration) { this->boost_duration_ms_ = duration; }
+  void set_boost_switch(switch_::Switch *boost) { this->boost_switch_ = boost; }
   void set_boost_active_sensor(binary_sensor::BinarySensor *sensor) { this->boost_active_sensor_ = sensor; }
   void set_boost_remaining_sensor(sensor::Sensor *sensor) { this->boost_remaining_sensor_ = sensor; }
   void set_temperature_limit(sensor::Sensor *sensor, float ceiling, float restart_margin,
@@ -44,7 +47,7 @@ class Kalfire : public Component {
   bool temperature_available_(uint32_t now) const;
   bool evaluate_limits_(uint32_t now, bool complete_boost = true);
   void stop_(const char *reason, uint32_t now);
-  void finish_boost_(uint32_t now);
+  void finish_boost_(uint32_t now, const char *off_reason = "Boost complete");
   void update_output_();
   void publish_mode_();
   void publish_diagnostics_(uint32_t now);
@@ -56,6 +59,8 @@ class Kalfire : public Component {
   sensor::Sensor *remaining_sensor_{nullptr};
   sensor::Sensor *boost_remaining_sensor_{nullptr};
   binary_sensor::BinarySensor *boost_active_sensor_{nullptr};
+  switch_::Switch *boost_switch_{nullptr};
+  bool boost_switch_published_{false};
   text_sensor::TextSensor *stop_reason_sensor_{nullptr};
   text_sensor::TextSensor *temperature_status_sensor_{nullptr};
 
@@ -71,7 +76,7 @@ class Kalfire : public Component {
   const char *last_stop_reason_{"Startup"};
 
   bool boost_active_{false};
-  uint32_t boost_duration_ms_{0};  // Disabled unless the optional button is configured.
+  uint32_t boost_duration_ms_{0};  // Disabled unless the optional switch is configured.
   uint32_t boost_started_ms_{0};
   Mode pre_boost_mode_{Mode::OFF};
 

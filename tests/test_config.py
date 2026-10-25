@@ -144,7 +144,7 @@ def test_dynamic_duration_without_other_limits(tmp_path):
 def test_boost_codegen(tmp_path, diagnostics):
     def change(config):
         add_limits(config)
-        config["kalfire"]["boost"] = {"id": "boost_button", "name": "Boost 10min"}
+        config["kalfire"]["boost"] = {"id": "boost_switch", "name": "Boost 10min"}
         if diagnostics:
             config["kalfire"]["boost"].update(
                 active={"name": "Boost active"}, time_remaining={"name": "Boost remaining"},
@@ -152,8 +152,10 @@ def test_boost_codegen(tmp_path, diagnostics):
     result, build = run_esphome(tmp_path, change, generate=True)
     assert result.returncode == 0, result.stdout + result.stderr
     generated = (build / "src/main.cpp").read_text()
-    assert "BoostButton" in generated
-    assert "boost_button->set_parent(" in generated
+    assert "BoostSwitch" in generated
+    assert "boost_switch->set_parent(" in generated
+    assert "set_boost_switch(boost_switch)" in generated
+    assert "SWITCH_ALWAYS_OFF" in generated
     assert "set_boost_duration(600000)" in generated
     assert ("set_boost_active_sensor(" in generated) == diagnostics
     assert ("set_boost_remaining_sensor(" in generated) == diagnostics
@@ -176,6 +178,31 @@ def test_custom_boost_without_session_limits(tmp_path):
     generated = (build / "src/main.cpp").read_text()
     assert "set_boost_duration(300000)" in generated
     assert "set_session_timeout(" not in generated
+
+
+@pytest.mark.parametrize("restore_mode", ["ALWAYS_ON", "RESTORE_DEFAULT_ON", "RESTORE_DEFAULT_OFF", "DISABLED"])
+def test_boost_cannot_restore(tmp_path, restore_mode):
+    result, _ = run_esphome(tmp_path, lambda c: c["kalfire"].update(
+        boost={"name": "Boost", "restore_mode": restore_mode},
+    ))
+    assert result.returncode != 0
+    assert "restore_mode" in result.stdout + result.stderr
+
+
+def test_boost_cannot_invert(tmp_path):
+    result, _ = run_esphome(tmp_path, lambda c: c["kalfire"].update(
+        boost={"name": "Boost", "inverted": True},
+    ))
+    assert result.returncode != 0
+    assert "inverted" in result.stdout + result.stderr
+
+
+def test_boost_old_button_automation_rejected(tmp_path):
+    result, _ = run_esphome(tmp_path, lambda c: c["kalfire"].update(
+        boost={"name": "Boost", "on_press": [{"logger.log": "old button action"}]},
+    ))
+    assert result.returncode != 0
+    assert "on_press" in result.stdout + result.stderr
 
 
 def test_timer_without_temperature(tmp_path):

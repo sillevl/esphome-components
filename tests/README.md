@@ -30,8 +30,10 @@ synchronous callback re-entrancy. Duration-dropdown tests cover every label's du
 the 1h default, restored/invalid saved choices, nested selections and immutable active
 deadlines. Preference storage is a test double; physical NVS writes and physical I2C
 are not simulated. Boost tests cover Off/Manual/ECO return modes, independent
-countdowns, non-extending repeated presses, manual takeover, clock wrap, reboot,
-limit priority, sensor recovery and re-entrant stop/start callbacks.
+countdowns, non-extending repeated On commands, switch Off cancellation/toggle,
+Manual/ECO restoration, manual takeover, clock wrap, reboot, limit priority,
+sensor recovery and re-entrant stop/start callbacks. Schema tests reject switch
+inversion, restoring boost after reboot and obsolete button callbacks.
 
 The Python tests invoke the real ESPHome validator/code generator, including
 negative tests for invalid limits, missing sensor references, legacy switch YAML

@@ -12,6 +12,7 @@ void Kalfire::setup() {
   this->ready_ = false;
   this->mode_ = Mode::OFF;
   this->boost_active_ = false;
+  this->boost_switch_published_ = false;
   this->flame_height_ = 1;
   this->last_stop_reason_ = "Startup";
   this->sample_seen_ = false;
@@ -76,7 +77,7 @@ bool Kalfire::request_boost() {
   const uint32_t now = millis();
   const uint32_t revision = this->command_revision_;
   if (this->evaluate_limits_(now) || revision != this->command_revision_) return false;
-  if (this->boost_active_) return true;  // Repeated presses never extend boost.
+  if (this->boost_active_) return true;  // Repeated On commands never extend boost.
   if (this->temperature_sensor_ != nullptr && (!this->temperature_available_(now) || this->too_warm_)) {
     ESP_LOGW(TAG, "Boost request rejected by temperature limit");
     return false;
@@ -94,6 +95,16 @@ bool Kalfire::request_boost() {
   this->publish_mode_();
   this->publish_diagnostics_(now);
   return this->boost_active_;
+}
+
+bool Kalfire::cancel_boost() {
+  if (!this->ready_ || this->stopping_) return false;
+  const uint32_t now = millis();
+  const uint32_t revision = this->command_revision_;
+  // Limits win over manual restoration; preserve newer callback commands too.
+  if (this->evaluate_limits_(now) || revision != this->command_revision_) return !this->boost_active_;
+  if (this->boost_active_) this->finish_boost_(now, "User");
+  return !this->boost_active_;
 }
 
 bool Kalfire::set_flame_height(float height) {
@@ -191,9 +202,9 @@ void Kalfire::stop_(const char *reason, uint32_t now) {
   this->stopping_ = false;
 }
 
-void Kalfire::finish_boost_(uint32_t now) {
+void Kalfire::finish_boost_(uint32_t now, const char *off_reason) {
   if (this->pre_boost_mode_ == Mode::OFF) {
-    this->stop_("Boost complete", now);
+    this->stop_(off_reason, now);
     return;
   }
   this->boost_active_ = false;
@@ -236,6 +247,11 @@ void Kalfire::publish_diagnostics_(uint32_t now) {
   if (this->boost_active_sensor_ != nullptr &&
       (!this->boost_active_sensor_->has_state() || this->boost_active_sensor_->state != this->boost_active_)) {
     this->boost_active_sensor_->publish_state(this->boost_active_);
+  }
+  if (this->boost_switch_ != nullptr &&
+      (!this->boost_switch_published_ || this->boost_switch_->state != this->boost_active_)) {
+    this->boost_switch_published_ = true;
+    this->boost_switch_->publish_state(this->boost_active_);
   }
   if (this->remaining_sensor_ != nullptr) {
     float remaining = NAN;  // Unlimited, not zero seconds remaining.

@@ -2,12 +2,13 @@ import math
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import binary_sensor, button, output, sensor, text_sensor
+from esphome.components import binary_sensor, output, sensor, text_sensor
+from esphome.components import switch as switch_core
 from esphome.components import select as select_core
-from esphome.const import CONF_ID, CONF_OUTPUT, CONF_SENSOR, ENTITY_CATEGORY_DIAGNOSTIC
+from esphome.const import CONF_ID, CONF_OUTPUT, CONF_RESTORE_MODE, CONF_SENSOR, ENTITY_CATEGORY_DIAGNOSTIC
 from esphome.core import coroutine_with_priority
 
-AUTO_LOAD = ["select", "output", "number", "sensor", "text_sensor", "button", "binary_sensor"]
+AUTO_LOAD = ["select", "output", "number", "sensor", "text_sensor", "switch", "binary_sensor"]
 kalfire_ns = cg.esphome_ns.namespace("kalfire")
 Kalfire = kalfire_ns.class_("Kalfire", cg.Component)
 CONF_KALFIRE_ID = "kalfire_id"
@@ -16,7 +17,7 @@ CONF_SESSION_DURATION = "session_duration"
 CONF_BOOST = "boost"
 CONF_DURATION = "duration"
 CONF_ACTIVE = "active"
-BoostButton = kalfire_ns.class_("BoostButton", button.Button)
+BoostSwitch = kalfire_ns.class_("BoostSwitch", switch_core.Switch)
 SessionDurationSelect = kalfire_ns.class_(
     "SessionDurationSelect", select_core.Select, cg.Component
 )
@@ -56,7 +57,12 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.GenerateID(): cv.declare_id(Kalfire),
     cv.Required(CONF_OUTPUT): cv.use_id(output.FloatOutput),
     cv.Optional(CONF_SESSION_TIMEOUT): bounded_duration,
-    cv.Optional(CONF_BOOST): button.button_schema(BoostButton, icon="mdi:fire").extend({
+    cv.Optional(CONF_BOOST): switch_core.switch_schema(
+        BoostSwitch, icon="mdi:fire", block_inverted=True, default_restore_mode="ALWAYS_OFF",
+    ).extend({
+        cv.Optional(CONF_RESTORE_MODE, default="ALWAYS_OFF"): cv.All(
+            cv.one_of("ALWAYS_OFF", upper=True), cv.enum(switch_core.RESTORE_MODES, upper=True),
+        ),
         cv.Optional(CONF_DURATION, default="10min"): bounded_duration,
         cv.Optional(CONF_ACTIVE): binary_sensor.binary_sensor_schema(
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
@@ -101,8 +107,9 @@ async def to_code(config):
         await cg.register_component(duration, conf)
         await cg.register_parented(duration, var)
     if conf := config.get(CONF_BOOST):
-        boost_button = await button.new_button(conf)
-        await cg.register_parented(boost_button, var)
+        boost_switch = await switch_core.new_switch(conf)
+        await cg.register_parented(boost_switch, var)
+        cg.add(var.set_boost_switch(boost_switch))
         cg.add(var.set_boost_duration(conf[CONF_DURATION].total_milliseconds))
         if active := conf.get(CONF_ACTIVE):
             cg.add(var.set_boost_active_sensor(await binary_sensor.new_binary_sensor(active)))

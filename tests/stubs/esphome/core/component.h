@@ -1,7 +1,11 @@
 #pragma once
 #include <cstdint>
 namespace esphome {
-namespace setup_priority { constexpr float DATA = 600.0f; constexpr float PROCESSOR = 400.0f; }
+namespace setup_priority {
+constexpr float HARDWARE = 800.0f;
+constexpr float DATA = 600.0f;
+constexpr float PROCESSOR = 400.0f;
+}
 class Component {
  public:
   virtual ~Component() = default;

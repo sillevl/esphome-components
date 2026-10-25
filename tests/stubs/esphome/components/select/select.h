@@ -3,10 +3,12 @@
 #include <optional>
 #include <cstddef>
 #include "esphome/core/component.h"
+#include "esphome/core/preferences.h"
 namespace esphome::select {
 class Select {
  public:
   virtual ~Select() = default;
+  template<class T> ESPPreferenceObject make_entity_preference() { return {}; }
   bool has_state() const { return has_state_; }
   std::optional<size_t> active_index() const { return has_state_ ? std::optional<size_t>(index_) : std::nullopt; }
   std::function<void(size_t)> callback;

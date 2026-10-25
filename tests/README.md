@@ -9,6 +9,7 @@ python tests/run_cpp_tests.py
 python -m pytest tests/test_config.py -q
 python -m esphome compile tests/configs/kalfire.yaml
 python -m esphome compile tests/configs/kalfire-limits.yaml
+python -m esphome compile tests/configs/kalfire-duration.yaml
 ```
 
 The native tests need `g++`. If it is unavailable, a Linux Docker image containing
@@ -24,14 +25,17 @@ The native harness compiles the actual component C++ against small ESPHome test
 doubles and a deterministic monotonic clock. It covers all eight levels, invalid
 inputs, Off/Manual/ECO, local expiry, non-resetting deadlines, temperature ceilings,
 restart margin, invalid/stale readings, grace recovery, clock wrap, startup-off and
-synchronous callback re-entrancy. It does not simulate physical I2C.
+synchronous callback re-entrancy. Duration-dropdown tests cover every label's duration,
+the 1h default, restored/invalid saved choices, nested selections and immutable active
+deadlines. Preference storage is a test double; physical NVS writes and physical I2C
+are not simulated.
 
 The Python tests invoke the real ESPHome validator/code generator, including
 negative tests for invalid limits, missing sensor references, legacy switch YAML
 and binary outputs. The firmware fixtures build the real module and GP8413 driver
-for ESP32-S3, both with and without optional limits. They contain no Wi-Fi/OTA
+for ESP32-S3, with no limits, fixed timer/temperature limits, and a duration dropdown. They contain no Wi-Fi/OTA
 credentials or upload step. The limits fixture's template sensor is simulated, not
-a real temperature measurement. Both are **build-only test images**, not replacements
+a real temperature measurement. All are **build-only test images**, not replacements
 for a deployed fireplace configuration.
 
 ## Windows / Git Bash

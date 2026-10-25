@@ -8,7 +8,7 @@ presence. It is not a thermostat and never restarts automatically when a room co
 
 - One `select` with mutually exclusive **Off / Manual / ECO** modes.
 - A flame-height number, **1–8**, used only in Manual mode.
-- An optional local session timeout.
+- An optional local session timeout, fixed or selected through a duration dropdown.
 - An optional external-sensor temperature ceiling, independent of the timer.
 - Optional diagnostics for remaining time, last stop reason and temperature readiness.
 
@@ -97,10 +97,51 @@ fractional/non-finite values) are rejected. Mode changes do not reset height.
 
 ## Session timeout
 
-`session_timeout` is fixed YAML configuration, **1 ms–24 h**. Omitting it disables
-the timer. A session begins only on Off → Manual/ECO. Switching between active modes,
-changing height, or repeating the current active mode does not reset the deadline.
-A deliberate Off followed by a new start creates a new session.
+Choose either a fixed `session_timeout` or the optional `session_duration` dropdown.
+They cannot be configured together. Omitting **both** disables the timer, preserving
+manual-only operation for existing configurations.
+
+### Fixed duration
+
+`session_timeout` remains fixed YAML configuration, **1 ms–24 h**. No changes to
+existing fixed-timer YAML are required.
+
+### Duration dropdown
+
+Replace `session_timeout` with:
+
+```yaml
+kalfire:
+  id: fireplace
+  output: fireplace_output
+  session_duration:
+    name: Session duration
+```
+
+This adds a separate select entity alongside the Off/Manual/ECO mode control:
+
+**15min · 30min · 45min · 1h · 1h30 · 2h · 3h · 4h**
+
+The first-boot default is **1h**. A chosen duration is saved using ESPHome entity
+preferences and restored on the Atom. Keep the entity identity stable when renaming
+or replacing configuration if you want to retain that preference. Missing/invalid
+saved data falls back to 1h. Only the duration is restored, never a running session.
+
+ESPHome batches flash writes according to its `preferences.flash_write_interval`.
+A sudden power loss before a pending write reaches flash can lose the most recent
+selection; this module does not force immediate flash writes on every change.
+
+A change applies **only to the next session**. Shorter and longer selections both
+leave the current countdown unchanged. The selected label is therefore the next
+session's duration; `time_remaining` continues to show the actual active countdown.
+Changing the dropdown while Off does not start the fireplace.
+
+### Shared session behaviour
+
+A session begins only on Off → Manual/ECO and snapshots the configured/selected
+duration at that moment. Switching between active modes, changing height, or
+repeating the current active mode does not reset the deadline. A deliberate Off
+followed by a new start creates a new session using the latest duration.
 
 Expiry requests 0 V and publishes Off. There is no automatic restart. A mode command
 received after an unprocessed deadline first ends that expired session; a subsequent

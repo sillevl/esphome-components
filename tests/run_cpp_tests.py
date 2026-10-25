@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCES = [
     "tests/test_kalfire.cpp",
     "components/kalfire/kalfire.cpp",
+    "components/kalfire/session_duration_select.cpp",
     "components/kalfire/select/mode_select.cpp",
     "components/kalfire/number/flame_height.cpp",
 ]

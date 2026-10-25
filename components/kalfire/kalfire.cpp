@@ -56,7 +56,10 @@ bool Kalfire::request_mode(Mode requested) {
     return false;
   }
   if (requested == this->mode_) return true;
-  if (this->mode_ == Mode::OFF) this->session_started_ms_ = now;
+  if (this->mode_ == Mode::OFF) {
+    this->session_started_ms_ = now;
+    this->active_session_timeout_ms_ = this->session_timeout_ms_;
+  }
   this->mode_ = requested;
   ++this->mode_revision_;
   this->update_output_();
@@ -110,8 +113,8 @@ bool Kalfire::evaluate_limits_(uint32_t now) {
     }
   }
   if (this->mode_ != Mode::OFF) {
-    if (this->session_timeout_ms_ != 0 &&
-        static_cast<uint32_t>(now - this->session_started_ms_) >= this->session_timeout_ms_) {
+    if (this->active_session_timeout_ms_ != 0 &&
+        static_cast<uint32_t>(now - this->session_started_ms_) >= this->active_session_timeout_ms_) {
       this->stop_("Timeout", now);
       return true;
     }
@@ -165,10 +168,11 @@ void Kalfire::publish_mode_() {
 void Kalfire::publish_diagnostics_(uint32_t now) {
   if (this->remaining_sensor_ != nullptr) {
     float remaining = NAN;  // Unlimited, not zero seconds remaining.
-    if (this->session_timeout_ms_ != 0) {
-      const uint32_t elapsed = this->mode_ == Mode::OFF ? this->session_timeout_ms_
-                                                     : now - this->session_started_ms_;
-      remaining = (this->session_timeout_ms_ - std::min(elapsed, this->session_timeout_ms_) + 999) / 1000;
+    const uint32_t timeout =
+        this->mode_ == Mode::OFF ? this->session_timeout_ms_ : this->active_session_timeout_ms_;
+    if (timeout != 0) {
+      const uint32_t elapsed = this->mode_ == Mode::OFF ? timeout : now - this->session_started_ms_;
+      remaining = (timeout - std::min(elapsed, timeout) + 999) / 1000;
     }
     const float old = this->remaining_sensor_->state;
     if (!this->remaining_sensor_->has_state() ||
@@ -192,7 +196,7 @@ void Kalfire::publish_diagnostics_(uint32_t now) {
 
 void Kalfire::dump_config() {
   ESP_LOGCONFIG(TAG, "Kalfire manual sessions (requested states only):");
-  ESP_LOGCONFIG(TAG, "  Local session timeout: %u ms (0 = disabled)", this->session_timeout_ms_);
+  ESP_LOGCONFIG(TAG, "  Next session timeout: %u ms (0 = disabled)", this->session_timeout_ms_);
   ESP_LOGCONFIG(TAG, "  Temperature limit: %s", this->temperature_sensor_ != nullptr ? "enabled" : "disabled");
 }
 

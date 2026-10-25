@@ -55,7 +55,9 @@ class Kalfire : public Component {
   bool ready_{false};
   bool stopping_{false};
   uint32_t mode_revision_{0};
+  // Configured duration is for the next session; active duration is snapshotted.
   uint32_t session_timeout_ms_{0};
+  uint32_t active_session_timeout_ms_{0};
   uint32_t session_started_ms_{0};
   const char *last_stop_reason_{"Startup"};
 

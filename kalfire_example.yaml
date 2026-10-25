@@ -66,8 +66,15 @@ kalfire:
   id: my_kalfire
   output: my_gp8403_output_1
 
-  # Optional local timer; omit for manual-only operation.
+  # Optional fixed local timer. Use this OR session_duration, not both.
+  # Omit both for manual-only operation.
   # session_timeout: 90min
+
+  # Optional duration dropdown, default 1h; remembers the last chosen duration.
+  # Options: 15min, 30min, 45min, 1h, 1h30, 2h, 3h, 4h.
+  # Changes apply only to the next session, never to an active countdown.
+  # session_duration:
+  #   name: Session duration
 
   # Optional ceiling: room_temperature must be a real, periodically publishing
   # Celsius sensor defined elsewhere in this configuration. Read the module's

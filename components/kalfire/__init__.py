@@ -3,6 +3,7 @@ import math
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import output, sensor, text_sensor
+from esphome.components import select as select_core
 from esphome.const import CONF_ID, CONF_OUTPUT, CONF_SENSOR, ENTITY_CATEGORY_DIAGNOSTIC
 from esphome.core import coroutine_with_priority
 
@@ -11,6 +12,11 @@ kalfire_ns = cg.esphome_ns.namespace("kalfire")
 Kalfire = kalfire_ns.class_("Kalfire", cg.Component)
 CONF_KALFIRE_ID = "kalfire_id"
 CONF_SESSION_TIMEOUT = "session_timeout"
+CONF_SESSION_DURATION = "session_duration"
+SessionDurationSelect = kalfire_ns.class_(
+    "SessionDurationSelect", select_core.Select, cg.Component
+)
+SESSION_DURATION_OPTIONS = ["15min", "30min", "45min", "1h", "1h30", "2h", "3h", "4h"]
 CONF_TEMPERATURE_LIMIT = "temperature_limit"
 CONF_CEILING = "ceiling"
 CONF_RESTART_MARGIN = "restart_margin"
@@ -42,10 +48,13 @@ def restart_margin(value):
     return value
 
 
-CONFIG_SCHEMA = cv.Schema({
+CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.GenerateID(): cv.declare_id(Kalfire),
     cv.Required(CONF_OUTPUT): cv.use_id(output.FloatOutput),
     cv.Optional(CONF_SESSION_TIMEOUT): bounded_duration,
+    cv.Optional(CONF_SESSION_DURATION): select_core.select_schema(
+        SessionDurationSelect, icon="mdi:timer-outline",
+    ).extend(cv.COMPONENT_SCHEMA),
     cv.Optional(CONF_TEMPERATURE_LIMIT): cv.Schema({
         cv.Required(CONF_SENSOR): cv.use_id(sensor.Sensor),
         cv.Required(CONF_CEILING): finite_temperature,
@@ -63,7 +72,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_TEMPERATURE_STATUS): text_sensor.text_sensor_schema(
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
     ),
-}).extend(cv.COMPONENT_SCHEMA)
+}).extend(cv.COMPONENT_SCHEMA), cv.has_at_most_one_key(CONF_SESSION_TIMEOUT, CONF_SESSION_DURATION))
 
 
 @coroutine_with_priority(80.0)
@@ -73,6 +82,10 @@ async def to_code(config):
     cg.add(var.add_output(await cg.get_variable(config[CONF_OUTPUT])))
     if CONF_SESSION_TIMEOUT in config:
         cg.add(var.set_session_timeout(config[CONF_SESSION_TIMEOUT].total_milliseconds))
+    if conf := config.get(CONF_SESSION_DURATION):
+        duration = await select_core.new_select(conf, options=SESSION_DURATION_OPTIONS)
+        await cg.register_component(duration, conf)
+        await cg.register_parented(duration, var)
     if limit := config.get(CONF_TEMPERATURE_LIMIT):
         cg.add(var.set_temperature_limit(
             await cg.get_variable(limit[CONF_SENSOR]), limit[CONF_CEILING], limit[CONF_RESTART_MARGIN],

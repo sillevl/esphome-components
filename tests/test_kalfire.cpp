@@ -5,12 +5,14 @@
 #include <string>
 #include "esphome/core/hal.h"
 #include "components/kalfire/kalfire.h"
+#include "components/kalfire/session_duration_select.h"
 #include "components/kalfire/select/mode_select.h"
 #include "components/kalfire/number/flame_height.h"
 
 using namespace esphome;
 using namespace esphome::kalfire;
 
+class TestDuration : public SessionDurationSelect { public: using SessionDurationSelect::control; };
 class TestNumber : public FlameHeightNumber { public: using FlameHeightNumber::control; };
 class TestSelect : public ModeSelect { public: using ModeSelect::control; };
 
@@ -244,6 +246,89 @@ int main() {
     f.at(999); f.temperature.publish_state(22);
     f.at(1500);
     check(!f.off(), "periodic equal-valued real publications refresh freshness");
+  }
+  {
+    test_saved_preference.reset();
+    test_preference_writes = 0;
+    Fixture f;
+    TestDuration duration;
+    duration.set_parent(&f.controller);
+    duration.setup();
+    check(duration.active_index() == 3, "first boot defaults to 1h");
+    check(duration.get_setup_priority() > f.controller.get_setup_priority(), "duration restores before controller startup");
+    f.choose(Mode::MANUAL);
+    check(f.remaining.state == 3600, "default session lasts one hour");
+    f.at(1000);
+    duration.control(4);  // 1h30 for the next session only.
+    f.controller.loop();
+    check(f.remaining.state == 3599 && !f.off(), "longer choice does not extend active session");
+    duration.control(0);  // 15min must not shorten it either.
+    f.at(900000);
+    check(!f.off() && f.remaining.state == 2700, "shorter choice does not shorten active session");
+    f.choose(Mode::ECO);
+    f.at(3600000);
+    check(f.off() && f.reason.state == "Timeout", "active session still ends at original deadline");
+    f.choose(Mode::MANUAL);
+    check(f.remaining.state == 900, "next session uses latest choice");
+    duration.control(7);
+    f.choose(Mode::OFF);
+    f.choose(Mode::ECO);
+    check(f.remaining.state == 14400, "four-hour choice is supported");
+    auto writes = test_preference_writes;
+    duration.control(7);
+    duration.control(8);
+    duration.control(SIZE_MAX);
+    check(test_preference_writes == writes && duration.active_index() == 7, "repeated/invalid choices do not write preferences");
+  }
+  {
+    Fixture f;
+    TestDuration restored;
+    restored.set_parent(&f.controller);
+    restored.setup();
+    f.controller.setup();
+    check(restored.active_index() == 7 && f.off(), "fresh instance restores duration but never an active session");
+    f.choose(Mode::MANUAL);
+    check(f.remaining.state == 14400, "restored choice controls next session duration");
+  }
+  {
+    test_saved_preference = 255;
+    Fixture f;
+    TestDuration duration;
+    duration.set_parent(&f.controller);
+    duration.setup();
+    f.choose(Mode::ECO);
+    check(duration.active_index() == 3 && f.remaining.state == 3600, "invalid saved duration falls back to 1h");
+    duration.callback = [&](size_t index) { if (index == 4) duration.control(1); };
+    duration.control(4);
+    f.choose(Mode::OFF); f.choose(Mode::MANUAL);
+    check(duration.active_index() == 1 && f.remaining.state == 1800 && test_saved_preference == 1,
+          "newer nested duration selection wins in state, timer configuration and storage");
+  }
+  {
+    constexpr uint32_t seconds[] = {900, 1800, 2700, 3600, 5400, 7200, 10800, 14400};
+    Fixture f;
+    TestDuration duration;
+    duration.set_parent(&f.controller);
+    duration.setup();
+    for (size_t i = 0; i < 8; ++i) {
+      duration.control(i); f.choose(Mode::MANUAL);
+      check(f.remaining.state == seconds[i], "duration mapping " + std::to_string(i));
+      f.choose(Mode::OFF);
+    }
+  }
+  {
+    // Real setup order: restore duration first, then initialize controller Off.
+    Kalfire controller;
+    output::FloatOutput dac;
+    controller.add_output(&dac);
+    TestDuration duration;
+    duration.set_parent(&controller);
+    duration.callback = [&](size_t) { controller.request_mode(Mode::MANUAL); };
+    duration.control(7);  // Commands before setup are ignored.
+    duration.setup();
+    controller.setup();
+    check(controller.get_mode() == Mode::OFF && dac.writes.back() == 0,
+          "duration restoration callbacks cannot start the fireplace before controller startup");
   }
   std::cout << checks << " checks: " << failures << " failures\n";
   return failures ? 1 : 0;

@@ -111,6 +111,35 @@ def test_timer_and_temperature_are_independent(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_dynamic_duration_codegen(tmp_path):
+    def change(config):
+        add_limits(config)
+        config["kalfire"].pop("session_timeout")
+        config["kalfire"]["session_duration"] = {"id": "session_duration", "name": "Session duration"}
+    result, build = run_esphome(tmp_path, change, generate=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    generated = (build / "src/main.cpp").read_text()
+    assert "SessionDurationSelect" in generated
+    assert "session_duration->set_parent(" in generated
+    assert "set_session_timeout(" not in generated
+    for label in ["15min", "30min", "45min", "1h", "1h30", "2h", "3h", "4h"]:
+        assert f'"{label}"' in generated
+
+
+def test_fixed_and_dynamic_duration_conflict(tmp_path):
+    def change(config):
+        config["kalfire"].update(session_timeout="60min", session_duration={"name": "Session duration"})
+    result, _ = run_esphome(tmp_path, change)
+    assert result.returncode != 0
+    assert "session_duration" in result.stdout + result.stderr
+    assert "session_timeout" in result.stdout + result.stderr
+
+
+def test_dynamic_duration_without_other_limits(tmp_path):
+    result, _ = run_esphome(tmp_path, lambda c: c["kalfire"].update(session_duration={"name": "Session duration"}))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_timer_without_temperature(tmp_path):
     result, _ = run_esphome(tmp_path, lambda c: c["kalfire"].update(session_timeout="30min"))
     assert result.returncode == 0, result.stdout + result.stderr

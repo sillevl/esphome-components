@@ -1,0 +1,13 @@
+# Build-only fixture for the optional persistent duration selector.
+packages:
+  base: !include kalfire.yaml
+
+esphome:
+  name: kalfire-duration-test
+
+kalfire:
+  session_duration:
+    id: session_duration
+    name: Session duration
+  time_remaining:
+    name: Session time remaining

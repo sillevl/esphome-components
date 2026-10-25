@@ -10,6 +10,7 @@ python -m pytest tests/test_config.py -q
 python -m esphome compile tests/configs/kalfire.yaml
 python -m esphome compile tests/configs/kalfire-limits.yaml
 python -m esphome compile tests/configs/kalfire-duration.yaml
+python -m esphome compile tests/configs/kalfire-boost.yaml
 ```
 
 The native tests need `g++`. If it is unavailable, a Linux Docker image containing
@@ -28,13 +29,16 @@ restart margin, invalid/stale readings, grace recovery, clock wrap, startup-off 
 synchronous callback re-entrancy. Duration-dropdown tests cover every label's duration,
 the 1h default, restored/invalid saved choices, nested selections and immutable active
 deadlines. Preference storage is a test double; physical NVS writes and physical I2C
-are not simulated.
+are not simulated. Boost tests cover Off/Manual/ECO return modes, independent
+countdowns, non-extending repeated presses, manual takeover, clock wrap, reboot,
+limit priority, sensor recovery and re-entrant stop/start callbacks.
 
 The Python tests invoke the real ESPHome validator/code generator, including
 negative tests for invalid limits, missing sensor references, legacy switch YAML
 and binary outputs. The firmware fixtures build the real module and GP8413 driver
-for ESP32-S3, with no limits, fixed timer/temperature limits, and a duration dropdown. They contain no Wi-Fi/OTA
-credentials or upload step. The limits fixture's template sensor is simulated, not
+for ESP32-S3, with no limits, fixed timer/temperature limits, a duration dropdown,
+and boost combined with a dropdown and temperature limit. They contain no Wi-Fi/OTA
+credentials or upload step. The template sensors in the limits/boost fixtures are simulated, not
 a real temperature measurement. All are **build-only test images**, not replacements
 for a deployed fireplace configuration.
 

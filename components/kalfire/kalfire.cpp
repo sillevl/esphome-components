@@ -11,6 +11,7 @@ void Kalfire::setup() {
   // GP8403/GP8413 initializes at DATA priority. No previous session is restored.
   this->ready_ = false;
   this->mode_ = Mode::OFF;
+  this->boost_active_ = false;
   this->flame_height_ = 1;
   this->last_stop_reason_ = "Startup";
   this->sample_seen_ = false;
@@ -44,9 +45,9 @@ bool Kalfire::request_mode(Mode requested) {
   const uint32_t now = millis();
   // An overdue session cannot be extended by a repeated mode command. Also
   // preserve any newer command issued by synchronous diagnostic callbacks.
-  const uint32_t revision = this->mode_revision_;
+  const uint32_t revision = this->command_revision_;
   const bool stopped = this->evaluate_limits_(now);
-  if (requested != Mode::OFF && (stopped || revision != this->mode_revision_)) return false;
+  if (requested != Mode::OFF && (stopped || revision != this->command_revision_)) return false;
   if (requested == Mode::OFF) {
     if (this->mode_ != Mode::OFF) this->stop_("User", now);
     return true;
@@ -55,17 +56,44 @@ bool Kalfire::request_mode(Mode requested) {
     ESP_LOGW(TAG, "Start/mode request rejected by temperature limit");
     return false;
   }
-  if (requested == this->mode_) return true;
+  if (requested == this->mode_ && !this->boost_active_) return true;
+  // An accepted explicit mode request takes over from boost, even Manual again.
+  this->boost_active_ = false;
   if (this->mode_ == Mode::OFF) {
     this->session_started_ms_ = now;
     this->active_session_timeout_ms_ = this->session_timeout_ms_;
   }
   this->mode_ = requested;
-  ++this->mode_revision_;
+  ++this->command_revision_;
   this->update_output_();
   this->publish_mode_();
   this->publish_diagnostics_(now);
   return this->mode_ == requested;
+}
+
+bool Kalfire::request_boost() {
+  if (!this->ready_ || this->stopping_ || this->boost_duration_ms_ == 0) return false;
+  const uint32_t now = millis();
+  const uint32_t revision = this->command_revision_;
+  if (this->evaluate_limits_(now) || revision != this->command_revision_) return false;
+  if (this->boost_active_) return true;  // Repeated presses never extend boost.
+  if (this->temperature_sensor_ != nullptr && (!this->temperature_available_(now) || this->too_warm_)) {
+    ESP_LOGW(TAG, "Boost request rejected by temperature limit");
+    return false;
+  }
+  this->pre_boost_mode_ = this->mode_;
+  if (this->mode_ == Mode::OFF) {
+    this->session_started_ms_ = now;
+    this->active_session_timeout_ms_ = this->session_timeout_ms_;
+  }
+  this->boost_started_ms_ = now;
+  this->boost_active_ = true;
+  this->mode_ = Mode::MANUAL;
+  ++this->command_revision_;
+  this->update_output_();
+  this->publish_mode_();
+  this->publish_diagnostics_(now);
+  return this->boost_active_;
 }
 
 bool Kalfire::set_flame_height(float height) {
@@ -73,7 +101,11 @@ bool Kalfire::set_flame_height(float height) {
     ESP_LOGW(TAG, "Ignoring invalid/not-ready flame height request; expected an integer from 1 to 8");
     return false;
   }
+  const uint32_t revision = this->command_revision_;
   this->evaluate_limits_(millis());
+  if (revision != this->command_revision_) return false;
+  this->boost_active_ = false;
+  ++this->command_revision_;
   this->flame_height_ = static_cast<uint8_t>(height);
   this->update_output_();
   return true;
@@ -86,8 +118,9 @@ bool Kalfire::temperature_available_(uint32_t now) const {
 
 void Kalfire::on_temperature_(float value) {
   const uint32_t now = millis();
-  // Enforce any deadline already reached before accepting a recovery sample.
-  this->evaluate_limits_(now);
+  // Enforce an already overdue session/sensor cutoff before a recovery sample,
+  // but defer boost restoration until the newly arrived measurement is checked.
+  this->evaluate_limits_(now, false);
   this->temperature_ = value;
   this->sample_ms_ = now;
   this->sample_seen_ = true;
@@ -95,7 +128,7 @@ void Kalfire::on_temperature_(float value) {
   this->evaluate_limits_(now);
 }
 
-bool Kalfire::evaluate_limits_(uint32_t now) {
+bool Kalfire::evaluate_limits_(uint32_t now, bool complete_boost) {
   if (this->temperature_sensor_ != nullptr) {
     // Once expired, an old sample stays expired even after another millis wrap.
     if (this->sample_seen_ && static_cast<uint32_t>(now - this->sample_ms_) >= this->max_age_ms_) {
@@ -130,6 +163,14 @@ bool Kalfire::evaluate_limits_(uint32_t now) {
       }
     }
   }
+  // A temperature callback's precheck must not restore or notify using the old
+  // sample while a possibly hot/invalid new measurement is awaiting evaluation.
+  if (!complete_boost) return false;
+  // Session/temperature stops above always win over restoring pre-boost mode.
+  if (this->boost_active_ && static_cast<uint32_t>(now - this->boost_started_ms_) >= this->boost_duration_ms_) {
+    this->finish_boost_(now);
+    return true;
+  }
   this->publish_diagnostics_(now);
   return false;
 }
@@ -141,7 +182,8 @@ void Kalfire::stop_(const char *reason, uint32_t now) {
   // attempts from Off/stop-reason automations during this transition.
   this->stopping_ = true;
   this->mode_ = Mode::OFF;
-  ++this->mode_revision_;
+  this->boost_active_ = false;
+  ++this->command_revision_;
   this->last_stop_reason_ = reason;
   this->update_output_();
   this->publish_mode_();
@@ -149,10 +191,26 @@ void Kalfire::stop_(const char *reason, uint32_t now) {
   this->stopping_ = false;
 }
 
+void Kalfire::finish_boost_(uint32_t now) {
+  if (this->pre_boost_mode_ == Mode::OFF) {
+    this->stop_("Boost complete", now);
+    return;
+  }
+  this->boost_active_ = false;
+  this->mode_ = this->pre_boost_mode_;
+  ++this->command_revision_;
+  this->update_output_();
+  this->publish_mode_();
+  this->publish_diagnostics_(now);
+}
+
 void Kalfire::update_output_() {
   float voltage = 0.0f;
   if (this->mode_ == Mode::ECO) voltage = 9.5f;
-  else if (this->mode_ == Mode::MANUAL) voltage = 3.0f + 6.0f * (this->flame_height_ - 1) / 7.0f;
+  else if (this->mode_ == Mode::MANUAL) {
+    // Keep the selected normal height unchanged; boost temporarily requests level 8.
+    voltage = this->boost_active_ ? 9.0f : 3.0f + 6.0f * (this->flame_height_ - 1) / 7.0f;
+  }
   ESP_LOGI(TAG, "Requested voltage: %.3f", voltage);
   if (this->output_ != nullptr) this->output_->set_level(voltage / 10.0f);
 }
@@ -166,6 +224,19 @@ void Kalfire::publish_mode_() {
 }
 
 void Kalfire::publish_diagnostics_(uint32_t now) {
+  if (this->boost_remaining_sensor_ != nullptr) {
+    const uint32_t elapsed = now - this->boost_started_ms_;
+    const float remaining = this->boost_active_
+                                ? (this->boost_duration_ms_ - std::min(elapsed, this->boost_duration_ms_) + 999) / 1000
+                                : 0;
+    if (!this->boost_remaining_sensor_->has_state() || this->boost_remaining_sensor_->state != remaining) {
+      this->boost_remaining_sensor_->publish_state(remaining);
+    }
+  }
+  if (this->boost_active_sensor_ != nullptr &&
+      (!this->boost_active_sensor_->has_state() || this->boost_active_sensor_->state != this->boost_active_)) {
+    this->boost_active_sensor_->publish_state(this->boost_active_);
+  }
   if (this->remaining_sensor_ != nullptr) {
     float remaining = NAN;  // Unlimited, not zero seconds remaining.
     const uint32_t timeout =

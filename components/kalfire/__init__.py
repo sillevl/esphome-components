@@ -2,17 +2,21 @@ import math
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import output, sensor, text_sensor
+from esphome.components import binary_sensor, button, output, sensor, text_sensor
 from esphome.components import select as select_core
 from esphome.const import CONF_ID, CONF_OUTPUT, CONF_SENSOR, ENTITY_CATEGORY_DIAGNOSTIC
 from esphome.core import coroutine_with_priority
 
-AUTO_LOAD = ["select", "output", "number", "sensor", "text_sensor"]
+AUTO_LOAD = ["select", "output", "number", "sensor", "text_sensor", "button", "binary_sensor"]
 kalfire_ns = cg.esphome_ns.namespace("kalfire")
 Kalfire = kalfire_ns.class_("Kalfire", cg.Component)
 CONF_KALFIRE_ID = "kalfire_id"
 CONF_SESSION_TIMEOUT = "session_timeout"
 CONF_SESSION_DURATION = "session_duration"
+CONF_BOOST = "boost"
+CONF_DURATION = "duration"
+CONF_ACTIVE = "active"
+BoostButton = kalfire_ns.class_("BoostButton", button.Button)
 SessionDurationSelect = kalfire_ns.class_(
     "SessionDurationSelect", select_core.Select, cg.Component
 )
@@ -52,6 +56,16 @@ CONFIG_SCHEMA = cv.All(cv.Schema({
     cv.GenerateID(): cv.declare_id(Kalfire),
     cv.Required(CONF_OUTPUT): cv.use_id(output.FloatOutput),
     cv.Optional(CONF_SESSION_TIMEOUT): bounded_duration,
+    cv.Optional(CONF_BOOST): button.button_schema(BoostButton, icon="mdi:fire").extend({
+        cv.Optional(CONF_DURATION, default="10min"): bounded_duration,
+        cv.Optional(CONF_ACTIVE): binary_sensor.binary_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_TIME_REMAINING): sensor.sensor_schema(
+            unit_of_measurement="s", accuracy_decimals=0,
+            device_class="duration", entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+    }),
     cv.Optional(CONF_SESSION_DURATION): select_core.select_schema(
         SessionDurationSelect, icon="mdi:timer-outline",
     ).extend(cv.COMPONENT_SCHEMA),
@@ -86,6 +100,14 @@ async def to_code(config):
         duration = await select_core.new_select(conf, options=SESSION_DURATION_OPTIONS)
         await cg.register_component(duration, conf)
         await cg.register_parented(duration, var)
+    if conf := config.get(CONF_BOOST):
+        boost_button = await button.new_button(conf)
+        await cg.register_parented(boost_button, var)
+        cg.add(var.set_boost_duration(conf[CONF_DURATION].total_milliseconds))
+        if active := conf.get(CONF_ACTIVE):
+            cg.add(var.set_boost_active_sensor(await binary_sensor.new_binary_sensor(active)))
+        if remaining := conf.get(CONF_TIME_REMAINING):
+            cg.add(var.set_boost_remaining_sensor(await sensor.new_sensor(remaining)))
     if limit := config.get(CONF_TEMPERATURE_LIMIT):
         cg.add(var.set_temperature_limit(
             await cg.get_variable(limit[CONF_SENSOR]), limit[CONF_CEILING], limit[CONF_RESTART_MARGIN],

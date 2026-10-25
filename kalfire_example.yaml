@@ -76,6 +76,17 @@ kalfire:
   # session_duration:
   #   name: Session duration
 
+  # Optional temporary maximum-output override, then back to the prior mode.
+  # Normal flame height remains selected; Boost active indicates the override.
+  # Existing session and temperature limits always take priority.
+  # boost:
+  #   name: Boost 10min
+  #   duration: 10min
+  #   active:
+  #     name: Boost active
+  #   time_remaining:
+  #     name: Boost time remaining
+
   # Optional ceiling: room_temperature must be a real, periodically publishing
   # Celsius sensor defined elsewhere in this configuration. Read the module's
   # freshness documentation before using a sensor imported from HA.

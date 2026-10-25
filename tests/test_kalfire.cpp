@@ -5,6 +5,7 @@
 #include <string>
 #include "esphome/core/hal.h"
 #include "components/kalfire/kalfire.h"
+#include "components/kalfire/boost_button.h"
 #include "components/kalfire/session_duration_select.h"
 #include "components/kalfire/select/mode_select.h"
 #include "components/kalfire/number/flame_height.h"
@@ -21,7 +22,8 @@ struct Fixture {
   Kalfire controller;
   TestSelect mode;
   TestNumber height;
-  sensor::Sensor temperature, remaining;
+  sensor::Sensor temperature, remaining, boost_remaining;
+  binary_sensor::BinarySensor boost_active;
   text_sensor::TextSensor reason, status;
   Fixture(uint32_t timeout = 0, bool limit = false, uint32_t max_age = 1000, uint32_t grace = 500) {
     test_millis = 0;
@@ -32,6 +34,8 @@ struct Fixture {
     controller.set_flame_height_number(&height);
     controller.set_session_timeout(timeout);
     controller.set_time_remaining_sensor(&remaining);
+    controller.set_boost_remaining_sensor(&boost_remaining);
+    controller.set_boost_active_sensor(&boost_active);
     controller.set_last_stop_reason_sensor(&reason);
     controller.set_temperature_limit_status_sensor(&status);
     if (limit) controller.set_temperature_limit(&temperature, 23, 0.5f, max_age, grace);
@@ -41,6 +45,15 @@ struct Fixture {
   void at(uint32_t now) { test_millis = now; controller.loop(); }
   bool off() const { return controller.get_mode() == Mode::OFF && voltage() == 0; }
   float voltage() const { return dac.writes.empty() ? -1.0f : dac.writes.back() * 10.0f; }
+};
+
+struct BoostFixture : Fixture {
+  BoostButton button;
+  explicit BoostFixture(uint32_t timeout = 0, bool limit = false, uint32_t duration = 1000)
+      : Fixture(timeout, limit) {
+    controller.set_boost_duration(duration);
+    button.set_parent(&controller);
+  }
 };
 
 int failures = 0, checks = 0;
@@ -329,6 +342,171 @@ int main() {
     controller.setup();
     check(controller.get_mode() == Mode::OFF && dac.writes.back() == 0,
           "duration restoration callbacks cannot start the fireplace before controller startup");
+  }
+  {
+    Fixture f;
+    check(!f.controller.request_boost() && f.off(), "boost disabled when not configured");
+  }
+  {
+    BoostFixture f(5000);
+    f.height.control(3);
+    f.button.press();
+    check(f.controller.get_mode() == Mode::MANUAL && close(f.voltage(), 9), "boost from Off requests Manual level 8 voltage");
+    check(f.height.state == 3, "normal height selection is retained during temporary boost override");
+    check(f.boost_active.state && f.boost_remaining.state == 1 && f.remaining.state == 5, "boost and session countdowns are separate");
+    f.at(1000);
+    check(f.off() && !f.boost_active.state && f.reason.state == "Boost complete", "boost from Off returns to Off");
+    check(f.boost_remaining.state == 0 && f.remaining.state == 0, "both countdowns clear after boost-only session");
+    f.at(5000); check(f.off(), "completed boost does not restart");
+  }
+  {
+    BoostFixture f(5000);
+    f.height.control(3); f.choose(Mode::MANUAL);
+    f.at(1000); f.button.press();
+    f.at(1999); check(close(f.voltage(), 9), "boost remains high before deadline");
+    f.at(2000);
+    check(f.controller.get_mode() == Mode::MANUAL && close(f.voltage(), 3 + 12.0f / 7), "Manual boost restores previous normal height");
+    check(!f.boost_active.state && f.remaining.state == 3, "boost completion does not reset session timer");
+    f.at(5000); check(f.off() && f.reason.state == "Timeout", "original session deadline remains authoritative");
+  }
+  {
+    BoostFixture f;
+    f.height.control(2); f.choose(Mode::ECO); f.button.press();
+    check(close(f.voltage(), 9), "boost from ECO requests 9 V, not ECO 9.5 V");
+    f.at(1000);
+    check(f.controller.get_mode() == Mode::ECO && close(f.voltage(), 9.5f), "boost restores ECO");
+    f.choose(Mode::MANUAL);
+    check(close(f.voltage(), 3 + 6.0f / 7) && f.height.state == 2, "normal height is retained across ECO boost");
+  }
+  {
+    BoostFixture f;
+    f.button.press(); f.at(500); f.button.press();
+    f.at(1000);
+    check(f.off(), "repeated boost press never extends deadline");
+  }
+  {
+    BoostFixture f;
+    f.choose(Mode::MANUAL); f.button.press();
+    test_millis = 1000; f.button.press();
+    check(!f.controller.is_boost_active() && close(f.voltage(), 3), "late press ends old boost rather than starting another");
+  }
+  {
+    BoostFixture f;
+    f.choose(Mode::ECO); f.button.press();
+    f.at(500); f.choose(Mode::OFF); f.at(2000);
+    check(f.off() && !f.boost_active.state && f.reason.state == "User", "manual Off cancels restoration");
+  }
+  {
+    BoostFixture f;
+    f.choose(Mode::MANUAL); f.button.press();
+    f.at(500); f.choose(Mode::ECO); f.at(2000);
+    check(f.controller.get_mode() == Mode::ECO && !f.boost_active.state, "new mode wins and cancels pending restoration");
+  }
+  {
+    BoostFixture f;
+    f.height.control(3); f.choose(Mode::ECO); f.button.press();
+    f.choose(Mode::MANUAL);
+    check(!f.controller.is_boost_active() && close(f.voltage(), 3 + 12.0f / 7), "explicit Manual also cancels boost already reporting Manual");
+  }
+  {
+    BoostFixture f;
+    f.height.control(3); f.choose(Mode::ECO); f.button.press();
+    f.at(500); f.height.control(4); f.at(2000);
+    check(!f.boost_active.state && f.controller.get_mode() == Mode::MANUAL && f.height.state == 4 &&
+          close(f.voltage(), 3 + 18.0f / 7), "new height wins and cancels pending restoration");
+  }
+  {
+    BoostFixture f;
+    f.button.press(); f.height.control(2.5f); f.mode.control(3);
+    check(f.controller.is_boost_active() && close(f.voltage(), 9), "invalid requests do not cancel boost");
+  }
+  {
+    BoostFixture f(1000);
+    f.choose(Mode::ECO); f.button.press(); f.at(1000);
+    check(f.off() && f.reason.state == "Timeout" && !f.boost_active.state, "session expiry wins over simultaneous boost completion");
+    f.at(3000); check(f.off(), "timeout cannot later restore pre-boost ECO");
+  }
+  {
+    BoostFixture f(500);
+    f.button.press(); f.at(500);
+    check(f.off() && f.reason.state == "Timeout", "shorter session timeout wins over boost-only duration");
+  }
+  {
+    BoostFixture f(0, true);
+    f.button.press(); check(f.off(), "missing temperature blocks boost start");
+    f.temperature.publish_state(23); f.button.press(); check(f.off(), "hot temperature blocks boost start");
+    f.temperature.publish_state(22.8f); f.button.press(); check(f.off(), "restart margin also blocks boost");
+    f.temperature.publish_state(22.5f); f.choose(Mode::ECO); f.button.press();
+    f.at(500); f.temperature.publish_state(23);
+    check(f.off() && !f.boost_active.state && f.reason.state == "Temperature ceiling", "ceiling cancels boost and restoration");
+    f.temperature.publish_state(22); f.at(1000);
+    check(f.off(), "cooling after boost cutoff does not restore previous ECO");
+  }
+  {
+    BoostFixture f(0, true, 2000);
+    f.temperature.publish_state(22); f.choose(Mode::ECO); f.button.press();
+    f.at(1500);
+    check(f.off() && f.reason.state == "Temperature unavailable", "sensor grace expiry cancels boost");
+    f.temperature.publish_state(22); f.at(2000);
+    check(f.off(), "sensor recovery does not restore cancelled boost");
+  }
+  {
+    BoostFixture f(0, true, 2000);
+    f.temperature.publish_state(22); f.choose(Mode::ECO); f.button.press();
+    f.at(1000); f.at(1300); f.temperature.publish_state(22); f.at(2000);
+    check(f.controller.get_mode() == Mode::ECO && !f.controller.is_boost_active(), "sensor recovery inside grace permits normal boost completion");
+  }
+  {
+    BoostFixture f;
+    f.choose(Mode::ECO); f.button.press(); f.controller.setup(); f.at(2000);
+    check(f.off() && !f.boost_active.state && f.reason.state == "Startup", "reboot never restores boost or its previous active mode");
+  }
+  {
+    BoostFixture f;
+    test_millis = UINT32_MAX - 499; f.button.press();
+    f.at(499); check(f.controller.is_boost_active(), "boost works before wrapped deadline");
+    f.at(500); check(f.off(), "boost expires across millis wrap");
+  }
+  {
+    BoostFixture f;
+    f.mode.callback = [&](size_t i) { if (i == 1) f.choose(Mode::OFF); };
+    f.button.press();
+    check(f.off() && !f.controller.is_boost_active(), "nested Off wins over boost start");
+  }
+  {
+    BoostFixture f;
+    f.button.press();
+    f.boost_active.callback = [&](bool active) { if (!active) f.button.press(); };
+    f.boost_remaining.add_on_state_callback([&](float remaining) { if (remaining == 0) f.button.press(); });
+    f.mode.callback = [&](size_t i) { if (i == 0) f.button.press(); };
+    f.reason.callback = [&](const std::string &) { f.button.press(); };
+    f.at(1000);
+    check(f.off() && !f.controller.is_boost_active(), "boost-complete stop callbacks cannot synchronously restart");
+  }
+  {
+    BoostFixture f;
+    f.choose(Mode::ECO); f.button.press();
+    f.mode.callback = [&](size_t i) { if (i == 2) f.choose(Mode::OFF); };
+    f.at(1000);
+    check(f.off() && !f.controller.is_boost_active(), "nested Off during ECO restoration is preserved");
+  }
+  {
+    BoostFixture f(5000);
+    f.choose(Mode::MANUAL);
+    f.remaining.add_on_state_callback([&](float remaining) { if (remaining == 4) f.height.control(2); });
+    test_millis = 1000; f.button.press();
+    check(!f.controller.is_boost_active() && f.height.state == 2 && close(f.voltage(), 3 + 6.0f / 7),
+          "newer height command in diagnostics wins over older boost request");
+  }
+  {
+    BoostFixture f(0, true);
+    f.temperature.publish_state(22); f.choose(Mode::ECO); f.button.press();
+    const auto writes = f.dac.writes.size();
+    test_millis = 1000; f.temperature.publish_state(23);
+    bool no_restore_write = true;
+    for (size_t i = writes; i < f.dac.writes.size(); ++i) no_restore_write &= f.dac.writes[i] == 0;
+    check(f.off() && no_restore_write && f.reason.state == "Temperature ceiling",
+          "hot sample at boost deadline stops without transient ECO restoration");
   }
   std::cout << checks << " checks: " << failures << " failures\n";
   return failures ? 1 : 0;

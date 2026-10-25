@@ -21,8 +21,9 @@ jobs:
         run: python tests/run_cpp_tests.py
       - name: ESPHome schema and code-generation tests
         run: python -m pytest tests/test_config.py -q
-      - name: ESP32-S3 builds, optional limits and duration dropdown (no upload)
+      - name: ESP32-S3 builds, optional limits, dropdown and boost (no upload)
         run: |
           python -m esphome compile tests/configs/kalfire.yaml
           python -m esphome compile tests/configs/kalfire-limits.yaml
           python -m esphome compile tests/configs/kalfire-duration.yaml
+          python -m esphome compile tests/configs/kalfire-boost.yaml

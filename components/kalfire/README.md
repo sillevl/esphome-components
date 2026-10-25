@@ -10,6 +10,7 @@ presence. It is not a thermostat and never restarts automatically when a room co
 - A flame-height number, **1–8**, used only in Manual mode.
 - An optional local session timeout, fixed or selected through a duration dropdown.
 - An optional external-sensor temperature ceiling, independent of the timer.
+- An optional boost button: temporarily request maximum Manual output, then return.
 - Optional diagnostics for remaining time, last stop reason and temperature readiness.
 
 ```yaml
@@ -165,6 +166,64 @@ Wi-Fi settings. A Wi-Fi watchdog or other reboot can still stop a session via
 startup-off. With a temperature limit sourced from HA, a prolonged HA outage can
 also end the session through the temperature-freshness limit, as intended.
 
+## Optional boost
+
+Add this inside your existing `kalfire` block:
+
+```yaml
+kalfire:
+  id: fireplace
+  output: fireplace_output
+  session_duration:
+    name: Session duration
+  boost:
+    name: Boost 10min
+    duration: 10min  # Optional; defaults to 10min. Range: 1ms–24h.
+    active:         # Optional binary diagnostic.
+      name: Boost active
+    time_remaining:  # Optional boost-only countdown, seconds rounded up.
+      name: Boost time remaining
+```
+
+Omitting `boost` disables it. It works with either the duration dropdown, a fixed
+session timeout, or neither. No new secrets or HA automation are required.
+
+A button press temporarily requests **Manual at level 8 (9 V)**. There is no level
+9: 9.5 V is the separate ECO protocol. Boost time starts at the accepted command,
+not at confirmed ignition; no actual flame feedback is available.
+
+The normal flame-height number remains your selected **post-boost height**. It is
+not changed to 8 during boost. The mode select reports Manual and the optional
+`active` diagnostic indicates that boost is overriding the normal height.
+
+| Before boost | At normal boost completion |
+| --- | --- |
+| Off | Off (`last_stop_reason`: `Boost complete`) |
+| Manual | Manual at the unchanged selected height |
+| ECO | ECO, retaining the normal height selection |
+
+- Boost from Off starts a new session using the currently configured/selected duration.
+- Boost during an active session **never resets or extends its deadline**.
+- Session expiry, temperature ceiling and unavailable-temperature grace expiry take
+  priority over boost completion. They cancel boost and never restore a previous
+  active mode afterward. Cooling or sensor recovery does not restart anything.
+- An accepted explicit mode command (including Manual again), or a valid height
+  command, cancels boost. Your new command wins; no delayed restoration remains.
+- Off cancels boost immediately. Rejected/invalid commands leave boost unchanged.
+- Repeated boost presses do not extend the boost deadline or replace the saved mode.
+  A press arriving after an unprocessed deadline first completes the old boost; a
+  subsequent explicit press is needed to start a new one.
+- Atom reboot always returns Off, with no boost/session restoration. HA reconnect
+  does not itself start boost. Both countdowns run locally.
+
+The session `time_remaining` and `boost.time_remaining` have different meanings:
+the former is the actual session cutoff; the latter is when maximum-output override
+ends. Boost remaining is zero while inactive. With no session timeout configured,
+the session remaining sensor stays unknown, but boost still has its own deadline.
+
+Keep first tests supervised. Boost is a convenience, not a thermostat, certified
+safety control, or automatic fault-reset/ignition-retry mechanism.
+
 ## Temperature ceiling
 
 `temperature_limit.sensor` can refer to any ESPHome sensor, including a local probe
@@ -205,12 +264,12 @@ cached state; this interface cannot distinguish it from a new measurement.
 
 - `time_remaining`: seconds, rounded up. Zero when a timed session is off; unknown
   (`NaN`) if the timeout is disabled. Does not prove a physical flame has stopped.
-- `last_stop_reason`: `Startup`, `User`, `Timeout`, `Temperature ceiling`, or
-  `Temperature unavailable`. Remains the last stop reason during the next session;
+- `last_stop_reason`: `Startup`, `User`, `Timeout`, `Temperature ceiling`,
+  `Temperature unavailable`, or `Boost complete`. Remains the last stop reason during the next session;
   a rejected start does not overwrite it.
 - `temperature_limit_status`: `Disabled`, `Ready`, `Too warm`, or `Unavailable`.
 
-State/output are updated before callbacks. Newer nested mode/height commands are
+State/output are updated before callbacks. Newer nested mode/height/boost commands are
 not overwritten by older outer commands. Start attempts from synchronous startup
 or stop-publication callbacks are rejected, including timeout-stop notifications.
 This is not a security barrier against a separate automation repeatedly issuing new

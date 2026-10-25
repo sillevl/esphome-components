@@ -140,6 +140,44 @@ def test_dynamic_duration_without_other_limits(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("diagnostics", [False, True])
+def test_boost_codegen(tmp_path, diagnostics):
+    def change(config):
+        add_limits(config)
+        config["kalfire"]["boost"] = {"id": "boost_button", "name": "Boost 10min"}
+        if diagnostics:
+            config["kalfire"]["boost"].update(
+                active={"name": "Boost active"}, time_remaining={"name": "Boost remaining"},
+            )
+    result, build = run_esphome(tmp_path, change, generate=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    generated = (build / "src/main.cpp").read_text()
+    assert "BoostButton" in generated
+    assert "boost_button->set_parent(" in generated
+    assert "set_boost_duration(600000)" in generated
+    assert ("set_boost_active_sensor(" in generated) == diagnostics
+    assert ("set_boost_remaining_sensor(" in generated) == diagnostics
+
+
+@pytest.mark.parametrize("duration", ["0s", "-1s", "25h"])
+def test_invalid_boost_duration(tmp_path, duration):
+    def change(config):
+        config["kalfire"]["boost"] = {"name": "Boost", "duration": duration}
+    result, _ = run_esphome(tmp_path, change)
+    assert result.returncode != 0
+    assert "duration" in result.stdout + result.stderr
+
+
+def test_custom_boost_without_session_limits(tmp_path):
+    result, build = run_esphome(tmp_path, lambda c: c["kalfire"].update(
+        boost={"name": "Boost", "duration": "5min"},
+    ), generate=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    generated = (build / "src/main.cpp").read_text()
+    assert "set_boost_duration(300000)" in generated
+    assert "set_session_timeout(" not in generated
+
+
 def test_timer_without_temperature(tmp_path):
     result, _ = run_esphome(tmp_path, lambda c: c["kalfire"].update(session_timeout="30min"))
     assert result.returncode == 0, result.stdout + result.stderr

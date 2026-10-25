@@ -1,0 +1,27 @@
+# Build-only fixture for boost + duration dropdown + temperature ceiling.
+# The template is NOT a real room-temperature measurement.
+packages:
+  base: !include kalfire-duration.yaml
+
+esphome:
+  name: kalfire-boost-test
+
+sensor:
+  - platform: template
+    id: room_temperature
+    unit_of_measurement: °C
+    lambda: return 22.0f;
+    update_interval: 30s
+
+kalfire:
+  boost:
+    name: Boost 10min
+    active:
+      name: Boost active
+    time_remaining:
+      name: Boost time remaining
+  temperature_limit:
+    sensor: room_temperature
+    ceiling: 23°C
+  last_stop_reason:
+    name: Last stop reason
